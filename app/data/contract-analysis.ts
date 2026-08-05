@@ -1,11 +1,4 @@
-import { type ContractMissingItem, type ContractSummaryCard, type ContractTab } from '../types/domain';
-
-export const contractSummaryCards: ContractSummaryCard[] = [
-  { label: 'AI 분석 결과', value: '확인 필요', tone: 'orange' },
-  { label: '확인 필요 조항', value: '3개', tone: 'slate' },
-  { label: '추가 확인 항목', value: '2개', tone: 'slate' },
-  { label: '요청 문구 예시', value: '5개', tone: 'slate' },
-];
+import { type ContractMissingItem, type ContractTab } from '../types/domain';
 
 export const contractTabs: ContractTab[] = [
   { key: 'risk', label: '위험 조항 분석' },

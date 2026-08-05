@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
   // next는 두 경우 모두 넘긴다 — unreachable이면 "다시 시도" 링크가 이 경로로 다시
   // /auth/session-recover를 태우는 데 쓰고, session_expired(진짜 재로그인이 필요한, 더 흔한 경우)면
   // 로그인 폼/OAuth가 성공 후 이 값으로 복귀하는 데 쓴다(LoginFormClient.tsx,
-  // oauth/callback/route.ts 참고) — 여기서 안 넘기면 재로그인해도 항상 홈으로만 떨어진다.
+  // oauth/callback/page.tsx 참고) — 여기서 안 넘기면 재로그인해도 항상 홈으로만 떨어진다.
   const loginPath =
     refreshOutcomeStatus === 'unreachable'
       ? `/login?error=session_unavailable&next=${encodeURIComponent(next)}`

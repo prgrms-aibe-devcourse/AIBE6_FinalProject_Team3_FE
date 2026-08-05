@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Search } from 'lucide-react';
 import { updateAdminUserRole, updateAdminUserStatus } from '../../../services/adminActions';
@@ -22,6 +22,7 @@ type AdminUsersClientProps = {
   loadError?: string;
   filters: Filters;
   currentUserId: number;
+  onMutated?: () => void;
 };
 
 const ROLE_LABEL: Record<string, string> = { USER: '일반', ADMIN: '관리자' };
@@ -36,7 +37,7 @@ type ActiveAction =
   | { type: 'role'; user: AdminUserListItemDto }
   | { type: 'status'; user: AdminUserListItemDto };
 
-export function AdminUsersClient({ data, loadError, filters, currentUserId }: AdminUsersClientProps) {
+export function AdminUsersClient({ data, loadError, filters, currentUserId, onMutated }: AdminUsersClientProps) {
   const router = useRouter();
   const [email, setEmail] = useState(filters.email);
   const [nickname, setNickname] = useState(filters.nickname);
@@ -45,6 +46,19 @@ export function AdminUsersClient({ data, loadError, filters, currentUserId }: Ad
   const [action, setAction] = useState<ActiveAction | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string | undefined>();
+
+  // 검색창 로컬 state는 useState(filters.x)로 최초 1회만 seed되므로, 브라우저 뒤로/앞으로가기로
+  // filters props만 바뀌는 경우(page.tsx가 searchParams를 다시 읽어 내려줌)에는 반영되지 않아
+  // 테이블은 새 필터 결과를 보여주는데 검색창은 이전 값을 계속 보여주는 것처럼 어긋난다.
+  // filters가 바뀔 때마다 로컬 state를 다시 맞춰준다.
+  useEffect(() => {
+    // filters가 바뀌어 이 effect가 재실행될 때만 의미 있는 재설정이다(최초 실행 시 초기값과 동일).
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setEmail(filters.email);
+    setNickname(filters.nickname);
+    setRole(filters.role);
+    setStatus(filters.status);
+  }, [filters.email, filters.nickname, filters.role, filters.status]);
 
   function navigate(next: Partial<Filters & { page: number }>) {
     const merged = { email, nickname, role, status, page: 0, ...next };
@@ -76,7 +90,10 @@ export function AdminUsersClient({ data, loadError, filters, currentUserId }: Ad
         await updateAdminUserStatus(action.user.id, { status: nextStatus });
       }
       setAction(null);
-      router.refresh();
+      // router.refresh()는 이 화면이 전부 client component로 바뀌면서 다시 가져올 Server
+      // Component 데이터가 없어 실질적으로 no-op이다 - 부모(page.tsx)가 내려준 재조회 콜백을
+      // 직접 호출해야 목록에 변경 결과가 반영된다.
+      onMutated?.();
     } catch {
       setActionError('처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');
     } finally {

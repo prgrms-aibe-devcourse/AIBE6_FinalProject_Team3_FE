@@ -43,6 +43,21 @@ NEXT_PUBLIC_USE_MOCK_DATA=false
 `NEXT_PUBLIC_USE_MOCK_DATA=true`로 설정한 경우에만 `app/mocks/init`의 초기 mock 데이터를 사용합니다.
 기본 흐름은 Spring Boot API에서 데이터를 받는 구조입니다.
 
+## Cross-origin 배포 (`NEXT_PUBLIC_CROSS_ORIGIN_AUTH`)
+
+```bash
+NEXT_PUBLIC_CROSS_ORIGIN_AUTH=false
+```
+
+프론트(Vercel 등)와 백엔드(EC2 등)가 등록 도메인을 전혀 공유하지 않는 배포(백엔드 README의 "시나리오
+C")에서만 `true`로 설정합니다. `proxy.ts`/`(main)/layout.tsx`(Server Component)는 이 경우 백엔드가
+발급한 access/refresh 쿠키를 받을 수 없어(쿠키는 발급 도메인에만 종속) 로그인 여부를 서버에서 판단하지
+못합니다 — `true`로 설정하면 그 판단을 건너뛰고, 브라우저가 직접 크로스오리진
+fetch(`credentials:'include'`)로 백엔드에 확인하는 클라이언트 게이트(`(main)/MainLayoutGate.tsx`)로
+넘깁니다. 이때 백엔드는 `COOKIE_SAME_SITE=None` + `COOKIE_SECURE=true`로 배포돼 있어야 브라우저가
+실제로 쿠키를 주고받습니다. 로컬 개발이나 서브도메인 공유 배포에서는 `false`(또는 미설정)로 두면 기존
+서버측 게이트가 그대로 동작합니다.
+
 API 응답은 다음 공통 포맷을 기준으로 unwrap합니다.
 
 ```ts

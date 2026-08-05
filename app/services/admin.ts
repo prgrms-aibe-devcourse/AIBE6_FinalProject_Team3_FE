@@ -14,9 +14,12 @@ import {
   type PageResponseDto,
 } from '../types/api';
 
-// 이 파일은 GET 전용이고 page.tsx(Server Component)에서만 호출된다 - mutation/단건 조회는
-// adminActions.ts에 분리되어 있다(그 파일의 주석 참고). adminRepository.ts를 이 파일에서만
-// import하도록 유지해야 mock repository/init 데이터가 브라우저 번들에 딸려가지 않는다.
+// 이 파일은 GET 전용이고 admin/*.tsx page들에서 호출된다 - mutation/단건 조회는
+// adminActions.ts에 분리되어 있다(그 파일의 주석 참고). admin/*.tsx가 크로스오리진 배포
+// 대응으로 전부 Client Component가 되면서(2026-08-04) 이 파일도 이제 page.tsx가 아니라
+// 'use client' 컴포넌트에서 직접 호출되고, adminRepository.ts의 mock repository/init 데이터도
+// 브라우저 번들에 포함된다(mock 데이터는 민감하지 않은 로컬 개발용 시드값이라 문제없다 -
+// adminRepository.ts 상단 주석 참고).
 export type AdminUserSearchParams = {
   page?: number;
   email?: string;

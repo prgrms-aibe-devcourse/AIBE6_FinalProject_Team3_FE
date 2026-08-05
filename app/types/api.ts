@@ -134,6 +134,15 @@ export type OcrExtractResponseDto = {
   uncertainFields: ContractOcrUncertainField[];
 };
 
+// upload -> result 페이지 전달용 조합 페이로드. 백엔드가 내려주는 단일 응답이 아니라, OCR 단계의
+// uncertainFields와 마스킹 단계의 maskedText/maskedCount를 FE가 한 번에 묶어 query string에 싣는다.
+// 텍스트 직접 입력 경로는 OCR을 안 거치므로 uncertainFields가 항상 빈 배열이다.
+export type ContractMaskingReviewPayload = {
+  maskedText: string;
+  maskedCount: number;
+  uncertainFields: ContractOcrUncertainField[];
+};
+
 export type ContractMaskingRequestDto = {
   text: string;
 };
@@ -250,14 +259,7 @@ export type PropertyStatusDto = 'ACTIVE' | 'DELETED';
 
 // 매물 이미지가 어느 공간을 찍은 사진인지 라벨. 선택값 - 라벨 없이 올릴 수도 있다(null).
 export type RoomTypeDto =
-  | 'LIVING_ROOM'
-  | 'BEDROOM'
-  | 'BATHROOM'
-  | 'KITCHEN'
-  | 'ENTRANCE'
-  | 'VERANDA'
-  | 'EXTERIOR'
-  | 'ETC';
+  'LIVING_ROOM' | 'BEDROOM' | 'BATHROOM' | 'KITCHEN' | 'ENTRANCE' | 'VERANDA' | 'EXTERIOR' | 'ETC';
 
 // 등록/수정 요청과 상세 응답 양쪽에서 공용으로 쓰는 이미지 한 장의 형태.
 // imageUrl은 이미지 업로드 API(POST /properties/images/upload-url → S3 PUT → confirm)를 거쳐
@@ -348,6 +350,7 @@ export type PropertyListItemDto = {
   createdAt: string;
   // 체크리스트를 아예 시작 안 했으면 null(분모가 없음), 시작했으면 0~100 사이 정수(반올림).
   checklistProgress: number | null;
+  marketComparison: MarketComparisonDto;
 };
 
 export type PropertyDetailAddressDto = {
@@ -551,4 +554,68 @@ export type AdminChecklistItemTemplateCreateRequestDto = {
 
 export type AdminChecklistItemTemplateUpdateRequestDto = AdminChecklistItemTemplateCreateRequestDto & {
   active: boolean;
+};
+
+// --- risk-analysis 도메인 (Backend: com.algogyeyak.riskanalysis.**) ---
+
+export type RiskSignalTypeDto =
+  'PRICE_ANOMALY' | 'DUPLICATE_LISTING' | 'SAME_ACCOUNT_MULTIPLE' | 'SHORT_TERM_RELISTING';
+export type RiskCheckStatusDto = 'SUCCESS' | 'UNDETERMINABLE' | 'FAILED';
+export type RiskCheckReasonDto =
+  | 'NO_COMPARABLE_TRANSACTION'
+  | 'ADDRESS_INFO_MISSING'
+  | 'PROPERTY_TYPE_UNSUPPORTED'
+  | 'POLICY_CALCULATION_ERROR'
+  | 'DATA_FETCH_FAILURE'
+  | 'INTERNAL_ERROR';
+
+// GET /properties/{propertyId}/risk-signals 응답의 원소 하나.
+export type RiskSignalDto = {
+  signalType: RiskSignalTypeDto;
+  status: RiskCheckStatusDto;
+  reason: RiskCheckReasonDto | null;
+  description: string | null; // SUCCESS이면서 리스크가 실제로 발견된 경우에만 값 있음
+  checkedAt: string;
+};
+
+// GET /properties/{propertyId}/risk-signals 응답.
+export type RiskSignalListDto = {
+  propertyId: number;
+  signalCount: number;
+  signals: RiskSignalDto[];
+  disclaimer: string;
+};
+
+// POST /properties/{propertyId}/risk-analysis 응답. 화면 렌더링에는 안 쓰고(신호 상세는
+// GET /risk-signals가 담당), 판정 트리거 호출의 반환 타입을 명시하기 위해 정의한다.
+export type RiskAnalysisSummaryDto = {
+  propertyId: number;
+  signalCount: number;
+  policyVersion: string;
+  calculatedAt: string;
+};
+
+export type DepositSafetyStatusDto = 'CALCULATED' | 'UNAVAILABLE' | 'FAILED';
+export type DepositSafetyCheckReasonDto =
+  | 'ESTIMATED_PRICE_MISSING'
+  | 'DEPOSIT_INFO_MISSING'
+  | 'TRANSACTION_TYPE_UNSUPPORTED'
+  | 'CALCULATION_DATA_INVALID'
+  | 'INTERNAL_ERROR';
+
+// GET /properties/{propertyId}/deposit-safety, POST .../recalculate 공용 응답.
+export type DepositSafetyCheckDto = {
+  propertyId: number;
+  status: DepositSafetyStatusDto | null; // 한 번도 계산 안 됐으면 null (자동 트리거 덕분에 실사용에선 거의 안 생김)
+  jeonseRatio: number | null;
+  // 아래 3개는 재계산(이번 스코프 제외) 전용 필드지만 Backend가 항상 이 shape으로 내려주므로 타입엔 남긴다.
+  seniorDepositApplied: boolean;
+  seniorDeposit: number | null;
+  maxClaimAmount: number | null;
+  explanation: string | null;
+  referenceDate: string | null;
+  reason: DepositSafetyCheckReasonDto | null;
+  calculatedAt: string | null;
+  disclaimer: string;
+  recentOwnershipChangeWarning: boolean;
 };

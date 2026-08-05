@@ -139,7 +139,13 @@ let lastRefreshSucceededAt = 0;
 
 function refreshOnceInBrowser(): Promise<BrowserRefreshOutcome> {
   if (!refreshInFlight) {
-    refreshInFlight = fetch(`${getApiBaseUrl()}${REFRESH_PATH}`, { method: 'POST', credentials: 'include' })
+    refreshInFlight = fetch(`${getApiBaseUrl()}${REFRESH_PATH}`, {
+      method: 'POST',
+      credentials: 'include',
+      // 백엔드 CsrfHeaderFilter가 상태 변경 요청에 요구하는 헤더 - requestJson()을 거치지 않는
+      // raw fetch라 normalizeHeaders()의 자동 부착을 못 받으므로 직접 붙인다.
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+    })
       .then((response): BrowserRefreshOutcome => {
         if (response.ok) {
           lastRefreshSucceededAt = Date.now();
@@ -179,6 +185,12 @@ function normalizeHeaders(initHeaders?: HeadersInit, isFormData = false): Header
   // 여기서 미리 값을 넣으면 안 된다(넣으면 boundary 없는 잘못된 헤더로 덮어써져 요청이 깨진다).
   if (!isFormData && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
+  }
+  // 백엔드 CsrfHeaderFilter가 상태 변경 요청(POST/PUT/PATCH/DELETE)에 요구하는 최소 CSRF 방어용
+  // 헤더 - SameSite=None 배포에서는 크로스사이트 요청에도 쿠키가 실리므로, 순수 HTML 폼은 붙일 수
+  // 없는 이 커스텀 헤더로 "진짜 이 프론트가 보낸 요청"임을 구분한다. GET에도 붙여도 무해하다.
+  if (!headers.has('X-Requested-With')) {
+    headers.set('X-Requested-With', 'XMLHttpRequest');
   }
   return headers;
 }
@@ -228,7 +240,10 @@ export async function refreshSession(refreshTokenCookieValue: string): Promise<R
   try {
     response = await fetch(`${getApiBaseUrl()}${REFRESH_PATH}`, {
       method: 'POST',
-      headers: { Cookie: `${REFRESH_TOKEN_COOKIE}=${refreshTokenCookieValue}` },
+      // 백엔드 CsrfHeaderFilter가 상태 변경 요청에 요구하는 헤더 - 이건 서버(Next.js)가 실제 쿠키
+      // 값을 들고 직접 호출하는 신뢰된 서버-서버 통신이라 CSRF 공격 대상이 아니지만, 필터는 호출
+      // 주체를 구분하지 않고 헤더 존재 여부만 보므로 똑같이 붙여야 통과한다.
+      headers: { Cookie: `${REFRESH_TOKEN_COOKIE}=${refreshTokenCookieValue}`, 'X-Requested-With': 'XMLHttpRequest' },
     });
   } catch {
     return { status: 'unreachable' };

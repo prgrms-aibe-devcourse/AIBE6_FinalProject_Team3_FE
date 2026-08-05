@@ -1,38 +1,67 @@
-import { cookies } from 'next/headers';
+'use client';
+
+import { Loader2 } from 'lucide-react';
+import { useParams } from 'next/navigation';
+import { useEffect, useState } from 'react';
 import { createOrGetChecklist, getChecklistResult } from '../../../../services/checklist';
 import { getPropertyById } from '../../../../services/properties';
 import { type ChecklistSummary } from '../../../../lib/checklistSummary';
 import { type Checklist, type PropertyDetail } from '../../../../types/domain';
 import { ChecklistClient } from './ChecklistClient';
 
-export const dynamic = 'force-dynamic';
+export default function Page() {
+  const params = useParams<{ id: string }>();
+  const propertyId = Number(params.id);
 
-type PageProps = {
-  params: Promise<{ id: string }>;
-};
+  const [checklist, setChecklist] = useState<Checklist | undefined>(undefined);
+  const [summary, setSummary] = useState<ChecklistSummary | undefined>(undefined);
+  const [loadError, setLoadError] = useState<string | undefined>(undefined);
+  const [property, setProperty] = useState<PropertyDetail | undefined>(undefined);
+  const [loading, setLoading] = useState(true);
 
-export default async function Page({ params }: PageProps) {
-  const { id } = await params;
-  const cookieHeader = (await cookies()).toString();
-  const propertyId = Number(id);
+  useEffect(() => {
+    let cancelled = false;
+    // propertyId가 바뀌어 이 effect가 재실행될 때만 의미 있는 재설정이다(최초 실행 시 초기값과
+    // 동일) - 다른 매물로 이동 시 새 로딩 상태를 보여줘야 하므로 의도적으로 동기 호출한다.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoading(true);
 
-  let checklist: Checklist | undefined;
-  let summary: ChecklistSummary | undefined;
-  let loadError: string | undefined;
+    async function load() {
+      try {
+        const loadedChecklist = await createOrGetChecklist(propertyId);
+        const loadedSummary = await getChecklistResult(loadedChecklist.id);
+        if (!cancelled) {
+          setChecklist(loadedChecklist);
+          setSummary(loadedSummary);
+          setLoadError(undefined);
+        }
+      } catch {
+        if (!cancelled) setLoadError('체크리스트를 불러오지 못했습니다. API 설정을 확인해 주세요.');
+      }
 
-  try {
-    checklist = await createOrGetChecklist(propertyId, cookieHeader);
-    summary = await getChecklistResult(checklist.id, cookieHeader);
-  } catch {
-    loadError = '체크리스트를 불러오지 못했습니다. API 설정을 확인해 주세요.';
-  }
+      // 매물 정보는 헤더 표시용 부가 정보라, 조회 실패해도 체크리스트 본문은 그대로 보여준다.
+      try {
+        const loadedProperty = await getPropertyById(propertyId);
+        if (!cancelled) setProperty(loadedProperty);
+      } catch {
+        if (!cancelled) setProperty(undefined);
+      }
 
-  // 매물 정보는 헤더 표시용 부가 정보라, 조회 실패해도 체크리스트 본문은 그대로 보여준다.
-  let property: PropertyDetail | undefined;
-  try {
-    property = await getPropertyById(propertyId, cookieHeader);
-  } catch {
-    property = undefined;
+      if (!cancelled) setLoading(false);
+    }
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [propertyId]);
+
+  if (loading) {
+    return (
+      <div className="flex min-h-[50vh] items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
+      </div>
+    );
   }
 
   return (

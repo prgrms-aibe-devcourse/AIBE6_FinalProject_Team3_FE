@@ -1,4 +1,3 @@
-import 'server-only';
 import {
   type AdminChecklistItemTemplateCreateRequestDto,
   type AdminChecklistItemTemplateDto,
@@ -26,12 +25,13 @@ import {
 } from '../mocks/init/admin';
 import { type AdminPropertyReportSearchParams, type AdminUserSearchParams } from '../services/admin';
 
-// PATCH가 상태를 바꾸면 이후 조회에도 반영되어야 하는데, Next.js 개발 서버(Turbopack)는 Route
-// Handler와 Server Component 페이지를 서로 다른 모듈 그래프로 컴파일해서, 이 파일도 진입점마다
-// 독립적으로 다시 평가된다 - 평범한 모듈 스코프 변수로 두면 각 그래프가 initAdminUsers에서 새로
-// 복제한 자기만의 복사본을 갖게 돼 mutation이 서로 안 보인다(실제로 재현 확인함: Route
-// Handler로 PATCH 성공 응답을 받아도 페이지를 다시 열면 원래 값으로 보임). Node.js 프로세스
-// 전체에서 유일한 globalThis에 붙여두면 어느 모듈 그래프에서 먼저 평가되든 하나의 상태를 공유한다.
+// (2026-08-04) admin/*.tsx page들이 크로스오리진 배포 대응으로 Client Component로 전환되면서
+// 더 이상 server-only로 막아둘 수 없게 됐다 - services/admin.ts(GET)가 여기를 정적으로
+// import하는데, 'use client' 페이지에서 그 체인을 타면 "server-only 모듈을 Client Component에
+// import" 빌드 에러가 난다. mock 데이터는 민감하지 않은 로컬 개발용 시드값이라 브라우저 번들에
+// 포함돼도 문제없다. 읽기(services/admin.ts)와 쓰기(services/adminActions.ts) 둘 다 이제
+// 브라우저에서 직접 이 모듈을 import해 같은 globalThis 상태를 보므로, mutation 후 목록을 다시
+// 읽어도 항상 최신 값이 보인다 - 브라우저 탭마다 독립된 상태로 시작한다(새로고침 시 초기화).
 type AdminMockState = {
   users: AdminUserListItemDto[];
   reports: AdminPropertyReportListItemDto[];

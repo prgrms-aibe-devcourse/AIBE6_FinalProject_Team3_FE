@@ -1,75 +1,58 @@
-# 위험도 분석(risk-analysis) 도메인 — Frontend 설계 제안
+# 위험도 분석(risk-analysis) 도메인 — Frontend 구현 현황 정리
 
 ## 배경 / 성격
 
-다른 도메인 문서(`auth-design.md` 등)는 **이미 있는 구현을 요구사항과 대조**하는 문서지만, 이 도메인은 소스 코드 확인 결과 **Frontend에 화면·타입·서비스가 전혀 없습니다.** `checkSignalCount`/`jeonseRatio` 필드가 존재하긴 하지만 mock 전용 타입(`PropertySummaryDto`)에만 있고, 실제 API를 타는 `PropertyListItemDto`/`PropertyDetailResponseDto`에는 아예 없습니다 — 즉 지금은 순수 자리표시자(placeholder)일 뿐 실제 연동 지점이 없습니다.
+이 문서는 원래 "Backend도 아직 구현 전"이라는 전제로 쓰여진 **제안 문서**였다. `docs/superpowers/specs/2026-07-31-risk-analysis-ui-design.md`를 브레인스토밍하면서 Backend 소스(`com.algogyeyak.riskanalysis.**`)를 직접 확인해보니 이미 API가 전부 구현되어 있었고, 그 스펙을 기준으로 FE 작업(`docs/superpowers/plans/2026-07-31-risk-analysis-ui.md`)을 완료했다. 이 문서는 그 결과를 다른 도메인 문서(`auth-design.md`, `checklist-design.md` 등)와 같은 성격의 **요구사항 대비 실제 구현 대조 문서**로 다시 정리한 것이다.
 
-그래서 이 문서는 대조표 대신, **요구사항 명세서를 기준으로 나중에 이 도메인을 붙일 때 참고할 설계 제안**으로 작성합니다. Backend도 아직 이 도메인을 구현하지 않은 것으로 보입니다(`CLAUDE.md` "Current state"에 auth/contract-analysis만 언급, risk-analysis 없음) — 그래서 API 계약도 확정이 아니라 **요구사항 문서를 그대로 옮긴 제안**입니다.
+**범위**: `app/(main)/properties/[id]/PropertyDetailClient.tsx`의 위험 신호/보증금 안전성 부분, `app/(main)/properties/[id]/risk-analysis/**`, `app/services/risk-analysis.ts`, `app/mappers/risk-analysis.ts`, `app/data/risk-analysis.ts`만 다룬다.
 
-## 지금 있는 것 (재사용 가능한 뼈대)
+## 실제 Backend API
 
-- `PropertyDetailClient.tsx`의 "확인 필요 신호" 카드 — `property.checkSignalCount !== undefined`일 때 `riskSummaries`(정적 데이터)를 아이콘+제목+설명으로 나열하는 구조가 이미 있음. `undefined`면 "준비 중" 배지 + "허위매물 의심 신호와 보증금 안전성 체크는 아직 준비 중이에요" 문구로 대체됨
-- `PropertiesClient.tsx`(목록)와 `home/page.tsx`도 같은 패턴(`checkSignalCount !== undefined ? ... : '준비 중'`)으로 이미 분기가 짜여 있어, 실제 데이터가 들어오면 이 조건만 자연히 참이 되는 구조
-- 카피 정책(`AGENTS.md`)이 이미 "허위매물입니다"/"위험도" 같은 단정적 표현을 금지하고 "확인 필요 신호 N개", "시세보다 20% 낮은 가격이에요 — 이유를 확인해보세요" 같은 사실 나열형 문구를 쓰도록 정해둬서, 이 도메인 요구사항의 "판정이 아닌 의심 신호" 톤과 이미 맞음
+| 메서드/경로                                                | 설명                                                                                        |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `POST /properties/{propertyId}/risk-analysis`              | 신호 4종을 판정·저장하고 요약(`signalCount`)만 반환. 몇 번을 불러도 결과가 같은 upsert 구조 |
+| `GET /properties/{propertyId}/risk-signals`                | 신호 4종의 현재 상태 전체 목록                                                              |
+| `GET /properties/{propertyId}/deposit-safety`              | 보증금 안전성(전세가율) 조회                                                                |
+| `POST /properties/{propertyId}/deposit-safety/recalculate` | 선순위보증금 반영 재계산 — **FE 미연동**(아래 "남은 이슈" 참고)                             |
 
-## 제안: 데이터 계약
+## 주요 화면 / 파일
 
-```ts
-// app/types/api.ts에 추가 제안
-export type RiskSignalTypeDto = 'PRICE_OUTLIER' | 'DUPLICATE_LISTING' | 'MULTIPLE_LISTINGS' | 'RELISTED_PATTERN';
+| 파일                                                                           | 역할                                                                                                   |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| `app/(main)/properties/[id]/PropertyDetailClient.tsx`                          | 매물 상세의 "확인 필요 신호" 카드(신호 미리보기 2개) + "보증금 안전성" 미니 섹션                       |
+| `app/(main)/properties/[id]/risk-analysis/page.tsx` + `RiskAnalysisClient.tsx` | 신호 4종 전체 + 보증금 안전성 전체를 보여주는 전용 화면 (요구사항엔 없는 화면 — 아래 "추가 구현" 참고) |
+| `app/services/risk-analysis.ts`                                                | `POST /risk-analysis`, `GET /risk-signals`, `GET /deposit-safety` 호출                                 |
+| `app/mappers/risk-analysis.ts`                                                 | DTO → 도메인 변환, `reason` enum → 한글 안내 문구 변환                                                 |
+| `app/data/risk-analysis.ts`                                                    | 신호 타입별 아이콘/제목, 사유별 안내 문구, 전세가율 톤 매핑                                            |
 
-export type RiskSignalDto = {
-  id: number;
-  signalType: RiskSignalTypeDto;
-  description: string;
-  detectedAt: string;
-};
+## 위험 신호 판정 — 요구사항 대비
 
-export type DepositSafetyStatusDto = 'CALCULATED' | 'UNAVAILABLE' | 'FAILED';
-export type DepositSafetyUnavailableReasonDto =
-  | 'NO_MARKET_PRICE'
-  | 'NO_DEPOSIT_INFO'
-  | 'NOT_APPLICABLE_TRANSACTION_TYPE' // 월세
-  | 'INSUFFICIENT_MARKET_DATA';
+| 요구사항                                              | 실제 구현                                                                                                                                                                                            |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 매물 상세에서 허위매물 의심 신호 확인                 | ✅ 매물 상세 카드에 상위 2개 미리보기, 전용 페이지에서 4종 전체 확인 가능                                                                                                                            |
+| "확인 필요 신호 N개 발견" 요약                        | ✅ `GET /risk-signals`의 `signalCount`를 배지로 그대로 표시                                                                                                                                          |
+| 판정 불가 사유 안내                                   | ✅ `UNDETERMINABLE`/`FAILED` 상태의 `reason`을 FE 로컬 매핑(`riskCheckReasonCopy`)으로 한글 문구 변환해서 보여줌(예: "주소 정보가 부족해 확인할 수 없어요")                                          |
+| 동일 계정 다수 등록 탐지 활성화/비활성화(정책 플래그) | Backend 책임(`RiskPolicyConfig.multiAccountDetectionEnabled`) — FE는 신호 목록에 `SAME_ACCOUNT_MULTIPLE`이 오면 그대로 보여주는 구조라, 이 플래그를 껐다 켰다 해도 FE 코드 변경 없이 자동으로 반영됨 |
 
-export type DepositSafetyCheckDto = {
-  status: DepositSafetyStatusDto;
-  jeonseRatio: number | null; // 0.82 = 82%
-  seniorDeposit: number | null;
-  maxClaimAmount: number | null;
-  explanation: string | null;
-  unavailableReason: DepositSafetyUnavailableReasonDto | null;
-  exceedsRecommendedRatio: boolean; // 150% 초과 시 "입력값을 다시 확인해주세요"
-  calculatedAt: string | null;
-};
-```
+## 보증금 안전성 — 요구사항 대비
 
-`market-data-design.md`에서 이미 지적했듯, **판정불가/실패 사유를 세분화하려면 문자열 status 하나가 아니라 이렇게 사유를 담을 필드가 반드시 필요**합니다 — 같은 실수를 이 도메인에서 반복하지 않으려면 처음부터 사유 필드를 계약에 넣는 게 좋습니다.
+| 요구사항                                              | 실제 구현                                                                                                                                                                                                                                                                                   |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 보증금 안전성(전세가율) 확인                          | ✅ 매물 상세 미니 섹션(퍼센트 + 톤 배지) + 전용 페이지(설명, 기준일까지 전체)                                                                                                                                                                                                               |
+| 판정불가/실패 사유 구분                               | ✅ `UNAVAILABLE`/`FAILED`의 `reason`을 FE 로컬 매핑(`depositSafetyReasonCopy`)으로 변환                                                                                                                                                                                                     |
+| "전세만 대상, 월세는 판정불가" 명확 안내              | ✅ `TRANSACTION_TYPE_UNSUPPORTED` 사유가 오면 "월세 매물은 전세가율을 계산하지 않아요"로 표시                                                                                                                                                                                               |
+| checklist 소유권취득일 + 높은 전세가율 조합 보조 신호 | ✅ **해결됨** — Backend `DepositSafetyCheckResponse.recentOwnershipChangeWarning`을 그대로 받아서, 보증금 안전성 섹션에 "최근 소유권이 바뀐 매물이에요" 경고 배너로 표시. `checklist-design.md` 남은 이슈 4번("화면에 자리 자체가 없음")이 이걸로 해소됨                                    |
+| 150% 초과 시 "입력값을 다시 확인해주세요" 경고        | ⚠️ **부분 구현.** 실제 `DepositSafetyCheckResponse`엔 이 경고 전용 필드(예: `exceedsRecommendedRatio`)가 없다 — `jeonseRatio` 자체가 150% 이상이면 톤 배지가 red로 바뀌긴 하지만, "입력값 오류일 수 있다"는 별도 안내 문구는 없음. Backend에 값 검증/경고 필드가 추가되면 다시 볼 필요 있음 |
+| 선순위보증금/근저당 채권최고액 입력                   | ❌ **이번 스코프에서 제외.** `POST /deposit-safety/recalculate` 자체를 호출하지 않음. 전용 페이지에 "선순위보증금을 반영하면 더 정확하게 계산할 수 있어요 (곧 지원 예정)" placeholder 카드만 있음                                                                                           |
 
-## 제안: 화면 반영 지점
+## 요구사항에 없던 추가 구현
 
-| 요구사항 | 제안 위치 |
-| --- | --- |
-| 매물 상세에서 허위매물 의심 신호 확인 | `PropertyDetailClient`의 "확인 필요 신호" 카드 — 지금 정적 `riskSummaries`를 `property.riskSignals`(API 응답)로 교체 |
-| "확인 필요 신호 N개 발견" 요약 | 이미 있는 `checkSignalCount` 배지를 실데이터로 채우기만 하면 됨 |
-| 판정 불가 사유 안내 | 지금은 "준비 중" 고정 문구뿐 — `unavailableReason`을 받으면 그에 맞는 문구로 분기 필요(예: "주소 정보가 부족해 비교할 수 없어요") |
-| 보증금 안전성(전세가율) 확인 | 매물 상세뿐 아니라 요구사항이 명시한 대로 계약 문구 분석 화면(`/contract/result`)에도 필요 — 지금 `/contract/result`의 "보증금" 탭은 완전 정적 데이터(`contract-analysis-design.md` 참고)라 여기 실데이터를 연결하는 게 자연스러운 통합 지점 |
-| 선순위보증금/근저당 채권최고액 선택 입력 | **완전히 새로 만들어야 하는 UI** — 지금 매물 등록/체크리스트 어디에도 이 값을 입력받는 폼이 없음. "논의중" 항목(입력 시점을 매물 등록 때 받을지, 체크리스트 서류·행정 카테고리에서 받을지)이 확정돼야 어느 화면에 넣을지 정해짐 |
-| 150% 초과 시 "입력값을 다시 확인해주세요" | 신규 — 지금 어떤 폼에도 이런 경고 배너 패턴이 없어 새로 만들어야 함 |
-| "전세만 대상, 월세는 판정불가" 명확 안내 | 신규 — 지금 매물 상세 어디에도 "이 계산은 전세 매물에만 적용됩니다" 같은 문구가 없음. 월세 매물 상세에서는 이 섹션 자체를 다르게 보여줘야 함(판정불가 사유: 거래유형) |
-| checklist 소유권취득일 + 높은 전세가율 조합 보조 신호 | 신규 — `checklist-design.md`에서도 이미 "화면에 자리 자체가 없다"고 지적한 부분과 동일. 이 신호를 매물 상세 어디에 넣을지(체크리스트 화면 vs 매물 상세) 설계 필요 |
-
-## 요구사항의 "논의중"(🔶) 항목 — FE 관점에서도 그대로 미확정으로 남겨둠
-
-요구사항 문서 자체가 3곳을 "논의중"으로 표시해뒀습니다. FE 설계도 이 확정을 기다려야 하는 지점이라 그대로 옮겨 적습니다:
-
-1. **동일 계정 다수 등록 탐지 기준(계정 수/기간/지역 다양성 임계값)** — 확정되기 전까지는 이 신호 타입 자체를 노출할지 말지 판단 불가. 요구사항도 "정책 플래그로 켜고 끌 수 있게" 구현하라고 되어 있으므로, FE도 신호 목록에 이 타입이 오면 표시하고 안 오면 표시 안 하는 식으로(신호 유무 기반 렌더링) 만들면 이 확정 여부와 무관하게 동작 가능
-2. **전세 전용 계산이라는 점을 어떻게 화면에서 안내할지 문구 미확정**
-3. **선순위보증금/근저당 입력을 어느 화면 흐름에서 받을지 미확정** — 매물 등록 vs 체크리스트 서류·행정 카테고리
+- **전용 페이지 `/properties/[id]/risk-analysis`** — 요구사항엔 없는 화면. 매물 상세 카드는 미리보기(신호 2개, 보증금 안전성 요약)만 보여주기로 설계해서, 전체 내용(신호 4종 전체, 보증금 설명/기준일 등)을 볼 별도 진입점이 필요해 추가함
+- **전세가율 4단계(안전/주의/경고) → FE 3색 톤으로 축소** — Backend `RiskPolicyConfig`는 80/100/150 기준선(4단계)을 두지만, FE의 기존 `ApiStatusTone`이 4색뿐이고 그중 slate는 "판정 불가"로 이미 쓰고 있어서 주의·경고 2단계를 orange 하나로 합침(`app/data/risk-analysis.ts` 참고)
 
 ## 남은 이슈 / 확인 필요 총정리
 
-1. **이 도메인은 Frontend에 구현이 전혀 없음** — 이 문서는 구현 후 재검증이 필요한 "제안" 단계
-2. **Backend API 계약이 먼저 확정돼야 함** — 특히 판정불가/실패 사유를 구분할 수 있는 필드가 처음부터 있어야, market-data 도메인에서 겪은 "사유 구분 불가" 문제를 반복하지 않음
-3. **선순위보증금/근저당 채권최고액 입력 폼이 완전히 새로 필요** — 어느 화면(매물 등록/체크리스트)에 넣을지는 위 "논의중 3번" 확정이 선행 조건
-4. **`/contract/result`의 "보증금" 탭이 이 도메인의 실제 진입점이 될 가능성이 높음** — 지금 그 탭이 완전 정적 데이터라는 걸 `contract-analysis-design.md`에서 이미 지적했는데, 이 도메인이 실제로 붙으면 그 탭을 채우는 데이터 소스가 됨
+1. **`POST /deposit-safety/recalculate`(선순위보증금 입력 → 정밀 재계산) 미연동** — 화면엔 비활성 placeholder만 있고 실제 입력 폼/호출이 없음. 다음 라운드 작업 대상
+2. **150% 초과 시 "입력값을 다시 확인해주세요" 전용 경고 문구 없음** — Backend 응답에 이 판단을 위한 필드 자체가 없어서, 추가하려면 Backend 계약 변경이 선행되어야 함
+3. **`/contract/result`("특약사항 분석") 화면의 "보증금" 탭이 여전히 완전 정적 데이터** — `contract-analysis-design.md`에서 이미 지적된 문제. 이번 작업으로 실제 보증금 안전성 데이터 소스(`getDepositSafety`)는 준비됐지만, 그 탭에 실제로 연결하는 작업은 이번 스코프에 포함하지 않음 — 다음에 이 탭을 손볼 때 자연스러운 연동 지점
+4. **`app/data/property-detail.ts`의 정적 `riskSummaries`가 죽은 코드로 남음** — 매물 상세 카드가 실데이터로 바뀌면서 더 이상 아무 데서도 참조되지 않지만, 이번 계획 범위 밖이라 삭제하지 않고 그대로 둠

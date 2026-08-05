@@ -2,7 +2,7 @@
 
 import { FileWarning, Home, Users } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Bar,
   BarChart,
@@ -61,6 +61,18 @@ export function AdminDashboardClient({ stats, loadError, startDate, endDate }: A
   const router = useRouter();
   const [rangeStart, setRangeStart] = useState(startDate);
   const [rangeEnd, setRangeEnd] = useState(endDate);
+
+  // 날짜 입력의 로컬 state는 useState(startDate/endDate)로 최초 1회만 seed되므로, 브라우저
+  // 뒤로/앞으로가기로 startDate/endDate props만 바뀌는 경우엔 반영되지 않아 차트는 새 기간을
+  // 보여주는데 입력창은 이전 값을 계속 보여주는 것처럼 어긋난다. props가 바뀔 때마다 로컬
+  // state를 다시 맞춰준다.
+  useEffect(() => {
+    // startDate/endDate가 바뀌어 이 effect가 재실행될 때만 의미 있는 재설정이다(최초 실행 시
+    // 초기값과 동일).
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setRangeStart(startDate);
+    setRangeEnd(endDate);
+  }, [startDate, endDate]);
 
   function handleRangeSubmit(event: React.FormEvent) {
     event.preventDefault();

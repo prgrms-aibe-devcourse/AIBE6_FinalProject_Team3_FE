@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import {
   createAdminChecklistItemTemplate,
   deleteAdminChecklistItemTemplate,
@@ -22,6 +21,7 @@ import { Table } from '../../../ui/Table';
 type AdminChecklistTemplatesClientProps = {
   data?: AdminChecklistItemTemplateDto[];
   loadError?: string;
+  onMutated: () => void;
 };
 
 const CATEGORY_LABEL: Record<ChecklistCategoryDto, string> = {
@@ -126,8 +126,7 @@ function resolveErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
 
-export function AdminChecklistTemplatesClient({ data, loadError }: AdminChecklistTemplatesClientProps) {
-  const router = useRouter();
+export function AdminChecklistTemplatesClient({ data, loadError, onMutated }: AdminChecklistTemplatesClientProps) {
   const [modal, setModal] = useState<ModalState>(null);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | undefined>();
@@ -168,7 +167,7 @@ export function AdminChecklistTemplatesClient({ data, loadError }: AdminChecklis
         await updateAdminChecklistItemTemplate(modal.template.id, { ...toCreateRequest(form), active: form.active });
       }
       setModal(null);
-      router.refresh();
+      onMutated();
     } catch (error) {
       setFormError(resolveErrorMessage(error, '저장 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.'));
     } finally {
@@ -183,7 +182,7 @@ export function AdminChecklistTemplatesClient({ data, loadError }: AdminChecklis
     try {
       await deleteAdminChecklistItemTemplate(modal.template.id);
       setModal(null);
-      router.refresh();
+      onMutated();
     } catch (error) {
       setFormError(resolveErrorMessage(error, '삭제 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.'));
     } finally {

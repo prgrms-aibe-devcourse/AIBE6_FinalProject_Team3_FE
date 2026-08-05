@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { crossOriginAuth } from './app/config/auth';
 import { useMockData } from './app/config/dataSource';
 import { CURRENT_PATH_HEADER, mergeCookieHeader, refreshSession } from './app/lib/api/http';
 
@@ -17,6 +18,15 @@ export async function proxy(request: NextRequest) {
 
   // mock 모드는 백엔드가 없어도 화면을 확인할 수 있어야 하므로 로그인 게이트를 건너뛴다.
   if (useMockData) {
+    return NextResponse.next({ request: { headers: requestHeaders } });
+  }
+
+  // 프론트/백엔드가 도메인을 공유하지 않는 배포(crossOriginAuth)에서는 이 미들웨어가 애초에
+  // access_token/refresh_token 쿠키를 받을 수 없다 — 브라우저가 발급 도메인(백엔드)에만 그
+  // 쿠키를 붙이기 때문이다. 여기서 "쿠키 없음"을 "로그인 안 됨"으로 오판해 매번 로그인 화면으로
+  // 튕기지 않도록, 로그인 판정 자체를 브라우저 쪽 크로스오리진 fetch로 넘긴다
+  // ((main)/MainLayoutGate.tsx 참고).
+  if (crossOriginAuth) {
     return NextResponse.next({ request: { headers: requestHeaders } });
   }
 
@@ -57,7 +67,7 @@ export async function proxy(request: NextRequest) {
   // 로그인하세요"가 아니라 "잠시 후 다시 시도하세요"를 보여주게 한다.
   //
   // next는 세 경우 모두 똑같이 넘긴다 — 로그인 폼/OAuth가 성공 후 이 값으로 복귀하므로
-  // (LoginFormClient.tsx, oauth/callback/route.ts 참고), next가 없으면 재로그인해도 항상
+  // (LoginFormClient.tsx, oauth/callback/page.tsx 참고), next가 없으면 재로그인해도 항상
   // 홈으로만 떨어진다.
   //
   // 에러 문구는 세 가지로 구분한다 — refreshToken 자체가 없었던 경우(애초에 로그인한 적 없음)는

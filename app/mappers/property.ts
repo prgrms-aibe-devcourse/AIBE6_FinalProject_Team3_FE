@@ -100,8 +100,11 @@ function formatDepositText(
 
 /**
  * 실제 GET /properties 응답(PropertyListItemDto) -> PropertySummary 변환.
- * 기능4(허위매물 신호)/기능5(전세가율)/관리비는 아직 백엔드에 없어서
- * 의도적으로 채우지 않는다 (undefined) - 화면(PropertiesClient)에서 조건부로 처리한다.
+ * 기능4(허위매물 신호)/기능5(전세가율)는 아직 백엔드 응답에 없어서 의도적으로 채우지 않는다
+ * (undefined) - 화면(PropertiesClient)에서 조건부로 처리한다. 시세대비(marketDelta)는
+ * marketComparison이 AVAILABLE일 때만 채우고, UNAVAILABLE/판정불가면 undefined로 둬서
+ * "준비 중"이 아니라 상세페이지처럼 사유가 있는 판정불가 상태임을 구분할 수 있게 한다 - 다만
+ * 카드 UI 자체는 아직 이 둘을 구분해 보여주지 않고 둘 다 "준비 중"으로만 표시한다(추후 개선 여지).
  * 체크리스트 진행률(checklistProgress)은 체크리스트를 시작 안 한 매물이면 null로 내려오는데,
  * PropertySummary.checklist는 undefined일 때 "준비 중"으로 표시하는 구조라 null -> undefined로 변환한다.
  * location도 목록 응답엔 좌표가 없어 0,0으로 채우는데, 목록 카드에서는 좌표를 쓰지 않는다.
@@ -115,6 +118,10 @@ export function mapPropertyListItemDto(dto: PropertyListItemDto): PropertySummar
     deposit: formatDepositText(dto.transactionType, dto.deposit, dto.monthlyRent),
     propertyType: propertyTypeLabelMap[dto.propertyType],
     checklist: dto.checklistProgress ?? undefined,
+    marketDelta:
+      dto.marketComparison.status === 'AVAILABLE' && dto.marketComparison.differenceRate !== null
+        ? formatMarketDelta(dto.marketComparison.differenceRate)
+        : undefined,
     statusColor: propertyStatusColorMap.slate,
     location: { latitude: 0, longitude: 0 },
   };

@@ -1,23 +1,34 @@
-import { cookies } from 'next/headers';
+'use client';
+
 import Link from 'next/link';
 import Image from 'next/image';
 import { ArrowRight, CheckCircle2, Shield } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { landingFeatures, landingSummaryItems } from './data/landing';
 import { DevLoginButton } from './DevLoginButton';
-import { getCurrentUser } from './services/auth';
+import { isLoggedIn as checkIsLoggedIn } from './services/auth';
 import { Badge } from './ui/Badge';
 import { FeatureCard } from './ui/FeatureCard';
 
-export default async function Page() {
-  // 이미 로그인된 상태라면 랜딩 페이지의 시작 CTA가 로그인 화면으로 다시 보내지 않고 홈으로 바로 이동한다.
-  let isLoggedIn = false;
-  try {
-    await getCurrentUser((await cookies()).toString());
-    isLoggedIn = true;
-  } catch {
-    isLoggedIn = false;
-  }
-  const startHref = isLoggedIn ? '/home' : '/login';
+export default function Page() {
+  // 공개 페이지라 로그인 확인 중에도 나머지 콘텐츠는 바로 보여준다 - 확인 전까지는 startHref가
+  // '/login'이다가, 이미 로그인된 상태로 확인되면 '/home'으로 바뀐다(브라우저에서 직접
+  // credentials:'include'로 확인해야 crossOriginAuth 배포에서도 정확하다). isLoggedIn()은
+  // getCurrentUser()와 달리 실패해도 로그인 화면으로 강제 이동시키지 않는다 - 로그인한 적 없는
+  // 첫 방문자가 그냥 공개 페이지를 봤을 뿐인데 튕기면 안 되기 때문.
+  const [loggedIn, setLoggedIn] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    checkIsLoggedIn().then((result) => {
+      if (!cancelled) setLoggedIn(result);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const startHref = loggedIn ? '/home' : '/login';
 
   return (
     <div className="bg-white">

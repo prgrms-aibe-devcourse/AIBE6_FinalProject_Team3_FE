@@ -71,9 +71,14 @@ export async function extractOcrText(image: File): Promise<ExtractOcrTextResult>
   return { extractedText: dto.extractedText, uncertainFields: dto.uncertainFields };
 }
 
-export async function maskContractText(text: string): Promise<string> {
+export type MaskContractTextResult = {
+  maskedText: string;
+  maskedCount: number;
+};
+
+export async function maskContractText(text: string): Promise<MaskContractTextResult> {
   if (useMockData) {
-    return text;
+    return { maskedText: text, maskedCount: 0 };
   }
 
   const dto = await requestJson<ContractMaskingResponseDto>('/contract-analysis/masking', {
@@ -81,7 +86,7 @@ export async function maskContractText(text: string): Promise<string> {
     body: JSON.stringify({ text } satisfies ContractMaskingRequestDto),
   });
 
-  return dto.maskedText;
+  return { maskedText: dto.maskedText, maskedCount: dto.maskedCount };
 }
 
 export async function analyzeContract(maskedText: string, userConfirmed: boolean): Promise<ContractAnalysisResult> {

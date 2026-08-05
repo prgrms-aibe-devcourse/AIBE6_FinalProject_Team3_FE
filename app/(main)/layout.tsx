@@ -1,11 +1,27 @@
 import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { type ReactNode } from 'react';
+import { crossOriginAuth } from '../config/auth';
 import { CURRENT_PATH_HEADER } from '../lib/api/http';
 import { getCurrentUser } from '../services/auth';
 import MainLayoutClient from './MainLayoutClient';
+import MainLayoutGate from './MainLayoutGate';
+
+// crossOriginAuth=true 분기는 cookies()/headers()를 호출하지 않아, Next.js가 이 레이아웃 하위
+// 경로를 자동으로 dynamic 렌더링으로 판단하지 못한다 - 정적 생성(SSG)을 시도하다가
+// useSearchParams()를 쓰는 client 하위 페이지(예: /admin/reports)에서 "should be wrapped in a
+// suspense boundary" 빌드 에러로 죽는다(실측: crossOriginAuth=true로 next build 시 100% 재현).
+// 이 레이아웃 하위는 전부 로그인 필요 페이지라 애초에 정적 생성이 의미 없으므로 명시적으로 강제한다.
+export const dynamic = 'force-dynamic';
 
 export default async function MainLayout({ children }: { children: ReactNode }) {
+  // crossOriginAuth 배포에서는 이 서버 컴포넌트가 access_token 쿠키를 받을 방법이 없으므로(쿠키가
+  // 백엔드 도메인에만 종속됨) 여기서 /auth/me를 확인하는 대신, 브라우저가 직접 크로스오리진
+  // fetch(credentials:'include')로 확인하는 클라이언트 게이트에 위임한다.
+  if (crossOriginAuth) {
+    return <MainLayoutGate>{children}</MainLayoutGate>;
+  }
+
   const cookieHeader = (await cookies()).toString();
 
   let nickname: string;

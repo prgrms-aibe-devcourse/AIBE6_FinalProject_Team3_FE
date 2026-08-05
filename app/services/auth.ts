@@ -13,6 +13,20 @@ export async function getCurrentUser(cookieHeader?: string): Promise<MeResponseD
   return requestJson<MeResponseDto>('/auth/me', cookieHeader ? { headers: { Cookie: cookieHeader } } : undefined);
 }
 
+// 랜딩 페이지(공개)처럼 "로그인 여부에 따라 CTA만 살짝 바꾸는" 용도의 비강제 확인용. getCurrentUser()는
+// requestJson()을 거치는데, 그건 401을 만나면 브라우저에서 자동으로 refresh를 시도하고 그래도
+// 실패하면 /auth/session-recover로 강제 이동시킨다(보호 페이지 전용 동작) - 로그인한 적 없는
+// 방문자가 그냥 공개 페이지를 봤을 뿐인데 로그인 화면으로 튕기면 안 되므로, 그 로직을 타지 않는
+// 순수 fetch로 성공 여부만 반환한다.
+export async function isLoggedIn(): Promise<boolean> {
+  try {
+    const response = await fetch(`${getApiBaseUrl()}/auth/me`, { credentials: 'include' });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 // 회원가입/비밀번호 변경 폼의 <input pattern="..."> 값을 여기서 받아온다 — backend
 // PasswordPolicy가 유일한 소스이고, 프론트는 이 값을 하드코딩해두지 않는다.
 export async function getPasswordPolicy(): Promise<PasswordPolicyDto> {

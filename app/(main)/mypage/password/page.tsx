@@ -1,12 +1,12 @@
-import { ArrowLeft } from 'lucide-react';
-import { headers } from 'next/headers';
+'use client';
+
+import { ArrowLeft, Loader2 } from 'lucide-react';
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
 import { getPasswordPolicy } from '../../../services/auth';
 import { getMyProfile } from '../../../services/user';
 import { type PasswordPolicyDto } from '../../../types/api';
 import { PasswordUpdateFormClient } from './PasswordUpdateFormClient';
-
-export const dynamic = 'force-dynamic';
 
 // backend가 내려오지 않는 극히 드문 경우에만 쓰는 최후의 fallback이다 — 평소엔 항상
 // getPasswordPolicy()가 실제 정책을 받아오므로, 이 값이 실제 정책과 어긋나도 서버가 최종
@@ -16,29 +16,46 @@ const FALLBACK_PASSWORD_POLICY: PasswordPolicyDto = {
   message: '영문과 숫자를 포함한 8~72자의 영문/숫자/기호를 입력해 주세요. 공백은 사용할 수 없습니다.',
 };
 
-export default async function PasswordUpdatePage() {
-  const cookieHeader = (await headers()).get('cookie') ?? undefined;
-
-  let hasPassword = false;
-  let email: string | null = null;
+export default function PasswordUpdatePage() {
+  const [hasPassword, setHasPassword] = useState(false);
+  const [email, setEmail] = useState<string | null>(null);
   // getMyProfile()이 실패한 경우(예: /auth/me는 통과했지만 /users/me만 일시적으로 실패)와
   // "실제로 조회했더니 email이 null"인 경우를 구분해야 한다 — 둘 다 뭉뚱그려 "이메일 미연동"으로
   // 보여주면, 그냥 일시적 오류였던 사용자가 "내 계정에 이메일이 없다"고 오해하게 된다.
-  let profileLoadFailed = false;
-  try {
-    const profile = await getMyProfile(cookieHeader);
-    hasPassword = profile.hasPassword;
-    email = profile.email;
-  } catch {
-    profileLoadFailed = true;
-  }
+  const [profileLoadFailed, setProfileLoadFailed] = useState(false);
+  const [passwordPolicy, setPasswordPolicy] = useState<PasswordPolicyDto>(FALLBACK_PASSWORD_POLICY);
+  const [loading, setLoading] = useState(true);
 
-  let passwordPolicy = FALLBACK_PASSWORD_POLICY;
-  try {
-    passwordPolicy = await getPasswordPolicy();
-  } catch {
-    // 조회 실패해도 폴백 정책으로 폼은 계속 동작해야 한다.
-  }
+  useEffect(() => {
+    let cancelled = false;
+
+    Promise.all([
+      getMyProfile()
+        .then((profile) => {
+          if (cancelled) return;
+          setHasPassword(profile.hasPassword);
+          setEmail(profile.email);
+        })
+        .catch((error) => {
+          console.error('Failed to load profile', error);
+          if (!cancelled) setProfileLoadFailed(true);
+        }),
+      // 조회 실패해도 폴백 정책으로 폼은 계속 동작해야 한다.
+      getPasswordPolicy()
+        .then((policy) => {
+          if (!cancelled) setPasswordPolicy(policy);
+        })
+        .catch((error) => {
+          console.error('Failed to load password policy, using fallback', error);
+        }),
+    ]).finally(() => {
+      if (!cancelled) setLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const title = profileLoadFailed ? '비밀번호' : hasPassword ? '비밀번호 변경' : '비밀번호 설정';
   // 로그인은 email+passwordHash 조합으로만 되므로(services/auth.ts login 참고), email이 없는
@@ -63,7 +80,11 @@ export default async function PasswordUpdatePage() {
 
       <div className="container mx-auto max-w-3xl px-4 py-8">
         <div className="ansim-card p-6">
-          {profileLoadFailed ? (
+          {loading ? (
+            <div className="flex min-h-[20vh] items-center justify-center">
+              <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
+            </div>
+          ) : profileLoadFailed ? (
             <>
               <h2 className="mb-2 text-xl font-bold text-slate-950">정보를 불러오지 못했어요</h2>
               <p className="text-sm text-slate-600">

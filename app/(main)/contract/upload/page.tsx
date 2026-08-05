@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   AlertCircle,
   ArrowRight,
@@ -10,48 +10,54 @@ import {
   FileText,
   Image as ImageIcon,
   Info,
+  Loader2,
   RotateCcw,
   Upload,
 } from 'lucide-react';
-import { analyzeContract, extractOcrText, maskContractText, submitContractInput } from '../../../services/contract-analysis';
-import { type ContractOcrUncertainField } from '../../../types/api';
-import { type ContractAnalysisResult } from '../../../types/domain';
-import { NoticeBox } from '../../../ui/NoticeBox';
+import { decodeBase64Url, encodeBase64Url } from '../../../lib/base64Url';
+import { extractOcrText, maskContractText, submitContractInput } from '../../../services/contract-analysis';
+import { type ContractMaskingReviewPayload } from '../../../types/api';
 
 const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/png'];
+const SUBMIT_BUTTON_LABEL = '특약사항 분석하기';
 
-// query string은 서버에 남기지 않는 대신 브라우저 히스토리/로그에 노출되므로, 결과를 그대로 담지 않고
-// base64url로 인코딩한다. 브라우저에는 Buffer가 없어 TextEncoder + btoa로 UTF-8 안전하게 인코딩한다.
-function encodeContractAnalysisResult(result: ContractAnalysisResult): string {
-  const json = JSON.stringify(result);
-  const bytes = new TextEncoder().encode(json);
-  let binary = '';
-  bytes.forEach((byte) => {
-    binary += String.fromCharCode(byte);
-  });
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
+type ProcessingStep = 'submitting-input' | 'ocr' | 'masking' | null;
+
+const PROCESSING_STEP_LABELS: Record<Exclude<ProcessingStep, null>, string> = {
+  'submitting-input': '입력을 확인하고 있어요...',
+  ocr: '이미지에서 문구를 읽어오고 있어요...',
+  masking: '개인정보를 마스킹하고 있어요...',
+};
 
 export default function Page() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [isDragging, setIsDragging] = useState(false);
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
-  const [text, setText] = useState('');
-  // 이미지 -> OCR까지 마치고 추출된 텍스트를 textarea에 채운 뒤, 사용자가 확인/수정하기를
-  // 기다리는 상태. 이 상태에선 제출 버튼이 "마스킹+분석"이 아니라 "확인"으로 동작한다.
-  const [ocrConfirmPending, setOcrConfirmPending] = useState(false);
-  // OCR이 신뢰도 낮게 추출한 구간. 자동으로 막지는 않고(더 이상 422로 거부되지 않음),
-  // 확인 단계에서 "이 부분들을 특히 확인해주세요" 안내로만 보여준다.
-  const [uncertainFields, setUncertainFields] = useState<ContractOcrUncertainField[]>([]);
+  // result 화면의 "수정하기"로 되돌아온 경우, 마스킹된 텍스트를 이어서 고칠 수 있게 프리필한다.
+  // useSearchParams()는 렌더 중 동기적으로 값을 읽을 수 있어 effect 없이 초기 state로 바로 계산한다.
+  const [text, setText] = useState(() => {
+    const encodedText = searchParams.get('text');
+    if (!encodedText) {
+      return '';
+    }
+    try {
+      return decodeBase64Url(encodedText);
+    } catch {
+      return '';
+    }
+  });
+  const [processingStep, setProcessingStep] = useState<ProcessingStep>(null);
   const [checks, setChecks] = useState({
     specialClauseOnly: false,
     maskedPrivacy: false,
     consent: false,
   });
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | undefined>();
+
+  const isProcessing = processingStep !== null;
 
   // objectURL은 selectedImage로부터 파생된 값이라 state가 아니라 useMemo로 계산하고,
   // effect는 이전 URL을 정리(revoke)하는 부수효과만 담당한다.
@@ -75,74 +81,64 @@ export default function Page() {
       return;
     }
     setSubmitError(undefined);
-    setOcrConfirmPending(false);
-    setUncertainFields([]);
     setText('');
     setSelectedImage(file);
   };
 
   const handleResetImage = () => {
     setSelectedImage(null);
-    setOcrConfirmPending(false);
-    setUncertainFields([]);
     setText('');
   };
 
   const allChecked = Object.values(checks).every(Boolean);
   const hasInput = selectedImage != null || text.trim().length > 0;
-  const canSubmit = !ocrConfirmPending && allChecked && hasInput && !isSubmitting;
-  const canConfirmOcrText = ocrConfirmPending && text.trim().length > 0 && !isSubmitting;
-  const isButtonEnabled = ocrConfirmPending ? canConfirmOcrText : canSubmit;
+  const isButtonEnabled = allChecked && hasInput && !isProcessing;
 
-  const navigateToResult = (result: ContractAnalysisResult) => {
-    const encoded = encodeContractAnalysisResult(result);
+  const navigateToMaskingReview = (payload: ContractMaskingReviewPayload) => {
+    const encoded = encodeBase64Url(JSON.stringify(payload));
     router.push(`/contract/result?data=${encoded}`);
   };
 
+  // "특약사항 분석하기" 버튼 하나로 텍스트든 이미지든 상관없이 (이미지면 OCR까지) 마스킹까지 자동으로
+  // 이어서 처리한다. 중간에 멈춰서 확인받는 단계는 없고, 완료되면 곧장 result 페이지로 이동한다.
   const handleSubmit = async () => {
     if (!isButtonEnabled) {
       return;
     }
 
-    setIsSubmitting(true);
     setSubmitError(undefined);
 
     try {
-      // 2단계: OCR 결과를 확인/수정한 뒤 "확인하고 분석하기"를 눌렀을 때 - 곧장 마스킹+분석으로.
-      if (ocrConfirmPending) {
-        const maskedText = await maskContractText(text);
-        const result = await analyzeContract(maskedText, checks.consent);
-        navigateToResult(result);
-        return;
-      }
-
-      // 1단계 - 이미지 우선: 이미지가 선택돼 있으면 텍스트는 무시(입력 UI에서 이미 상호 배타적으로 관리됨).
       if (selectedImage) {
+        setProcessingStep('submitting-input');
         const inputResult = await submitContractInput({ inputType: 'IMAGE', image: selectedImage });
         if (inputResult.nextStep !== 'OCR') {
           throw new Error('예상하지 못한 응답입니다.');
         }
 
+        setProcessingStep('ocr');
         const ocrResult = await extractOcrText(selectedImage);
-        setText(ocrResult.extractedText);
-        setUncertainFields(ocrResult.uncertainFields);
-        setOcrConfirmPending(true);
-        setIsSubmitting(false);
+
+        setProcessingStep('masking');
+        const maskResult = await maskContractText(ocrResult.extractedText);
+        navigateToMaskingReview({ ...maskResult, uncertainFields: ocrResult.uncertainFields });
         return;
       }
 
-      // 1단계 - 텍스트 직접 입력: 항상 nextStep이 'MASKING'이어야 정상이다.
+      // 텍스트 직접 입력: 항상 nextStep이 'MASKING'이어야 정상이다. OCR을 거치지 않으므로
+      // uncertainFields는 항상 빈 배열이다.
+      setProcessingStep('submitting-input');
       const inputResult = await submitContractInput({ inputType: 'TEXT', text });
       if (inputResult.nextStep === 'OCR') {
         throw new Error('이미지 입력이 필요합니다.');
       }
 
-      const maskedText = await maskContractText(text);
-      const result = await analyzeContract(maskedText, checks.consent);
-      navigateToResult(result);
+      setProcessingStep('masking');
+      const maskResult = await maskContractText(text);
+      navigateToMaskingReview({ ...maskResult, uncertainFields: [] });
     } catch {
       setSubmitError('특약사항 분석에 실패했습니다. 잠시 후 다시 시도해 주세요.');
-      setIsSubmitting(false);
+      setProcessingStep(null);
     }
   };
 
@@ -161,7 +157,7 @@ export default function Page() {
           isDragging ? 'border-teal-500 bg-teal-50' : 'border-slate-200 hover:border-teal-300 hover:bg-slate-50/50'
         }`}
         onClick={() => {
-          if (!selectedImage) {
+          if (!selectedImage && !isProcessing) {
             fileInputRef.current?.click();
           }
         }}
@@ -173,6 +169,9 @@ export default function Page() {
         onDrop={(event) => {
           event.preventDefault();
           setIsDragging(false);
+          if (isProcessing) {
+            return;
+          }
           const file = event.dataTransfer.files?.[0];
           if (file) {
             handleImageFile(file);
@@ -190,11 +189,12 @@ export default function Page() {
             <p className="text-sm text-slate-500">{selectedImage.name}</p>
             <button
               type="button"
+              disabled={isProcessing}
               onClick={(event) => {
                 event.stopPropagation();
                 handleResetImage();
               }}
-              className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50"
+              className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50 disabled:pointer-events-none disabled:opacity-50"
             >
               <RotateCcw className="h-4 w-4" /> 다시 선택
             </button>
@@ -244,38 +244,18 @@ export default function Page() {
       />
 
       <div className="mb-10">
-        <label className="mb-3 block text-sm font-bold text-slate-700">
-          {ocrConfirmPending ? 'OCR로 추출된 내용 확인' : '직접 입력'}
-        </label>
-        {ocrConfirmPending && (
-          <NoticeBox icon={Info} iconClassName="text-teal-600" className="mb-3 bg-teal-50 text-teal-700">
-            이미지에서 추출한 내용이에요. 이 내용이 맞는지 확인해주세요 — 틀린 부분은 직접 수정할 수 있습니다.
-          </NoticeBox>
-        )}
-        {ocrConfirmPending && uncertainFields.length > 0 && (
-          <div className="mb-3 rounded-xl border border-orange-100 bg-orange-50 p-4">
-            <p className="mb-2 flex items-center gap-2 text-sm font-bold text-orange-700">
-              <AlertCircle className="h-4 w-4" /> 이 부분들을 특히 확인해주세요
-            </p>
-            <ul className="space-y-1">
-              {uncertainFields.map((field) => (
-                <li key={field.index} className="text-sm text-orange-700">
-                  · {field.text}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
+        <label className="mb-3 block text-sm font-bold text-slate-700">직접 입력</label>
         <textarea
           className="ansim-input min-h-36 resize-y"
           placeholder="예: 임대인은 개인 사정에 따라 계약 기간 중 목적물 명도를 요청할 수 있다."
           value={text}
+          disabled={isProcessing}
           onChange={(event) => {
             const value = event.target.value;
             setText(value);
-            // OCR 확인 단계가 아닌데 이미지가 선택돼 있는 상태로 타이핑을 시작하면, 텍스트 입력으로
-            // 전환하는 것으로 보고 이미지 선택을 해제한다(이미지/텍스트 동시 입력으로 헷갈리지 않도록).
-            if (!ocrConfirmPending && selectedImage) {
+            // 이미지가 선택돼 있는 상태로 타이핑을 시작하면, 텍스트 입력으로 전환하는 것으로 보고
+            // 이미지 선택을 해제한다(이미지/텍스트 동시 입력으로 헷갈리지 않도록).
+            if (selectedImage) {
               setSelectedImage(null);
             }
           }}
@@ -329,6 +309,13 @@ export default function Page() {
 
       {submitError && <p className="mb-4 text-center text-sm text-red-600">{submitError}</p>}
 
+      {isProcessing && processingStep && (
+        <div className="mb-4 flex items-center justify-center gap-2 rounded-lg bg-slate-50 p-4 text-sm text-slate-600">
+          <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+          <span>{PROCESSING_STEP_LABELS[processingStep]}</span>
+        </div>
+      )}
+
       <button
         type="button"
         disabled={!isButtonEnabled}
@@ -339,12 +326,13 @@ export default function Page() {
             : 'pointer-events-none bg-slate-200 text-slate-400'
         }`}
       >
-        {isSubmitting
-          ? '분석 중...'
-          : ocrConfirmPending
-            ? '확인하고 분석하기'
-            : '특약사항 분석하기'}{' '}
-        <ArrowRight className="h-5 w-5" />
+        {isProcessing ? (
+          <Loader2 className="h-5 w-5 animate-spin" />
+        ) : (
+          <>
+            {SUBMIT_BUTTON_LABEL} <ArrowRight className="h-5 w-5" />
+          </>
+        )}
       </button>
     </div>
   );

@@ -1,10 +1,13 @@
-import { AlertTriangle, ArrowRight, FileSearch, Link2 } from 'lucide-react';
-import { cookies } from 'next/headers';
+'use client';
+
+import { AlertTriangle, ArrowRight, FileSearch, Link2, Loader2 } from 'lucide-react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import { Suspense, useEffect, useState } from 'react';
 import { quickActions, quickActionToneMap } from '../../data/dashboard';
 import { computeHomeSummaryCounts } from '../../lib/homeSummary';
 import { getPriorityAction } from '../../lib/priorityAction';
-import { classifyProfileLoadError, redirectIfSessionInvalid } from '../../lib/sessionErrors';
+import { classifyProfileLoadError, isSessionInvalidError } from '../../lib/sessionErrors';
 import { getActivityHistory } from '../../services/activityHistory';
 import { getChecklistResult, getMyChecklistOverviews } from '../../services/checklist';
 import { getProperties } from '../../services/properties';
@@ -20,8 +23,6 @@ import { ChecklistProgressWidget } from '../../ui/ChecklistProgressWidget';
 import { NoticeBox } from '../../ui/NoticeBox';
 import { PriorityActionCard } from '../../ui/PriorityActionCard';
 
-export const dynamic = 'force-dynamic';
-
 const emptyProfile: UserProfile = {
   nickname: '',
   email: null,
@@ -32,114 +33,177 @@ const emptyProfile: UserProfile = {
   hasPassword: false,
 };
 
-type HomePageProps = {
-  searchParams: Promise<{ notice?: string }>;
+type ChecklistProgressEntry = {
+  propertyId: number;
+  propertyTitle: string;
+  progressPercent: number;
+  cautionCount: number;
 };
 
-export default async function Page({ searchParams }: HomePageProps) {
-  const { notice } = await searchParams;
-  const cookieHeader = (await cookies()).toString();
+type PageData = {
+  loadError?: string;
+  profileNotFound: boolean;
+  profile: UserProfile;
+  properties: PropertySummary[];
+  propertiesTotalCount: number;
+  propertiesLoadFailed: boolean;
+  activityHistory: ActivityHistoryItem[];
+  checklistOverviews: ChecklistOverview[];
+  checklistProgressEntries: ChecklistProgressEntry[];
+};
 
-  let loadError: string | undefined;
-  let profileNotFound = false;
+function HomePageContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const notice = searchParams.get('notice') ?? undefined;
+  const [data, setData] = useState<PageData | null>(null);
 
-  let profile = emptyProfile;
-  try {
-    profile = await getMyProfile(cookieHeader);
-  } catch (error) {
-    if (classifyProfileLoadError(error) === 'not-found') {
-      profileNotFound = true;
-    } else {
-      // 실패 시 개인화 우선순위 카드는 미등록 상태 기준으로 표시하고, 아래 배너로 실패 사실을 알린다.
-      loadError = '일부 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.';
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      let loadError: string | undefined;
+      let profileNotFound = false;
+
+      let profile = emptyProfile;
+      try {
+        profile = await getMyProfile();
+      } catch (error) {
+        const classification = classifyProfileLoadError(error);
+        if (classification === 'session-invalid') {
+          router.push('/login?error=session_expired');
+          return;
+        }
+        if (classification === 'not-found') {
+          profileNotFound = true;
+        } else {
+          // 실패 시 개인화 우선순위 카드는 미등록 상태 기준으로 표시하고, 아래 배너로 실패 사실을 알린다.
+          loadError = '일부 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.';
+        }
+      }
+
+      let properties: PropertySummary[] = [];
+      let propertiesTotalCount = 0;
+      let propertiesLoadFailed = false;
+      try {
+        // 백엔드가 허용하는 최대 페이지 크기(100, PropertyController@PageableDefault 검증 로직 참고)만큼
+        // 한 번에 가져온다. interestedPropertyCount/hasProperty는 아래에서 totalElements를 쓰므로
+        // 매물이 100개를 넘어도 정확하지만, "중요 확인사항" 위젯(signalProperties)과 신호/체크리스트
+        // 기반 카운트는 이 items 배열(최대 100개, createdAt DESC)만 보므로 101번째 이후 오래된 매물의
+        // 신호는 반영되지 않는다. 실사용 규모상 무시 가능하다고 판단해 별도 페이지 순회는 하지 않는다.
+        const propertiesPage = await getProperties(undefined, { size: 100 });
+        properties = propertiesPage.items;
+        propertiesTotalCount = propertiesPage.totalElements;
+      } catch (error) {
+        if (isSessionInvalidError(error)) {
+          router.push('/login?error=session_expired');
+          return;
+        }
+        // 실패 시 "매물이 없다"고 단정하지 않도록 propertiesLoadFailed로 별도 표시하고,
+        // 아래 배너로도 실패 사실을 알린다.
+        propertiesLoadFailed = true;
+        loadError = '일부 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.';
+      }
+
+      let activityHistory: ActivityHistoryItem[] = [];
+      try {
+        activityHistory = await getActivityHistory();
+      } catch (error) {
+        if (isSessionInvalidError(error)) {
+          router.push('/login?error=session_expired');
+          return;
+        }
+        // 백엔드에 이 엔드포인트가 아직 없어 항상 실패한다(app/services/activityHistory.ts 참고) -
+        // 일시적 오류가 아니라 상시 상태라 배너로 알리지 않고, 분석한 특약사항 카운트/알림만 조용히
+        // 빈 상태로 둔다. 엔드포인트가 실제로 생기면 이 catch에서도 loadError를 다시 세팅할 것.
+      }
+
+      let checklistOverviews: ChecklistOverview[] = [];
+      try {
+        checklistOverviews = await getMyChecklistOverviews();
+      } catch (error) {
+        if (isSessionInvalidError(error)) {
+          router.push('/login?error=session_expired');
+          return;
+        }
+        // 실패 시 개인화 우선순위 카드는 "불러오지 못함" 상태로 표시하고, 아래 배너로도 실패 사실을 알린다.
+        loadError = '일부 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.';
+      }
+
+      let checklistProgressEntries: ChecklistProgressEntry[] = [];
+      try {
+        const inProgressChecklists = checklistOverviews.filter(
+          (overview): overview is ChecklistOverview & { checklistId: number } =>
+            overview.status === 'IN_PROGRESS' && overview.checklistId !== null,
+        );
+        checklistProgressEntries = await Promise.all(
+          inProgressChecklists.map(async (overview) => {
+            const summary = await getChecklistResult(overview.checklistId);
+            return {
+              propertyId: overview.propertyId,
+              propertyTitle: overview.propertyTitle,
+              progressPercent: summary.progressPercent,
+              cautionCount: summary.cautionCount,
+            };
+          }),
+        );
+      } catch (error) {
+        if (isSessionInvalidError(error)) {
+          router.push('/login?error=session_expired');
+          return;
+        }
+      }
+
+      if (!cancelled) {
+        setData({
+          loadError,
+          profileNotFound,
+          profile,
+          properties,
+          propertiesTotalCount,
+          propertiesLoadFailed,
+          activityHistory,
+          checklistOverviews,
+          checklistProgressEntries,
+        });
+      }
     }
-  }
 
-  let properties: PropertySummary[] = [];
-  let propertiesTotalCount = 0;
-  let propertiesLoadFailed = false;
-  try {
-    // 백엔드가 허용하는 최대 페이지 크기(100, PropertyController@PageableDefault 검증 로직 참고)만큼
-    // 한 번에 가져온다. interestedPropertyCount/hasProperty는 아래에서 totalElements를 쓰므로
-    // 매물이 100개를 넘어도 정확하지만, "중요 확인사항" 위젯(signalProperties)과 신호/체크리스트
-    // 기반 카운트는 이 items 배열(최대 100개, createdAt DESC)만 보므로 101번째 이후 오래된 매물의
-    // 신호는 반영되지 않는다. 실사용 규모상 무시 가능하다고 판단해 별도 페이지 순회는 하지 않는다.
-    const propertiesPage = await getProperties(cookieHeader, { size: 100 });
-    properties = propertiesPage.items;
-    propertiesTotalCount = propertiesPage.totalElements;
-  } catch (error) {
-    redirectIfSessionInvalid(error);
-    // 실패 시 "매물이 없다"고 단정하지 않도록 propertiesLoadFailed로 별도 표시하고,
-    // 아래 배너로도 실패 사실을 알린다.
-    propertiesLoadFailed = true;
-    loadError = '일부 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.';
-  }
+    load();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  let activityHistory: ActivityHistoryItem[] = [];
-  try {
-    activityHistory = await getActivityHistory(cookieHeader);
-  } catch (error) {
-    redirectIfSessionInvalid(error);
-    // 백엔드에 이 엔드포인트가 아직 없어 항상 실패한다(app/services/activityHistory.ts 참고) -
-    // 일시적 오류가 아니라 상시 상태라 배너로 알리지 않고, 분석한 특약사항 카운트/알림만 조용히
-    // 빈 상태로 둔다. 엔드포인트가 실제로 생기면 이 catch에서도 loadError를 다시 세팅할 것.
-  }
-
-  let checklistOverviews: ChecklistOverview[] = [];
-  try {
-    checklistOverviews = await getMyChecklistOverviews(cookieHeader);
-  } catch (error) {
-    redirectIfSessionInvalid(error);
-    // 실패 시 개인화 우선순위 카드는 "불러오지 못함" 상태로 표시하고, 아래 배너로도 실패 사실을 알린다.
-    loadError = '일부 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.';
-  }
-
-  let checklistProgressEntries: Array<{
-    propertyId: number;
-    propertyTitle: string;
-    progressPercent: number;
-    cautionCount: number;
-  }> = [];
-  try {
-    const inProgressChecklists = checklistOverviews.filter(
-      (overview): overview is ChecklistOverview & { checklistId: number } =>
-        overview.status === 'IN_PROGRESS' && overview.checklistId !== null,
+  if (!data) {
+    return (
+      <div className="flex min-h-[50vh] items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
+      </div>
     );
-    checklistProgressEntries = await Promise.all(
-      inProgressChecklists.map(async (overview) => {
-        const summary = await getChecklistResult(overview.checklistId, cookieHeader);
-        return {
-          propertyId: overview.propertyId,
-          propertyTitle: overview.propertyTitle,
-          progressPercent: summary.progressPercent,
-          cautionCount: summary.cautionCount,
-        };
-      }),
-    );
-  } catch (error) {
-    redirectIfSessionInvalid(error);
   }
 
-  const hasProperty = propertiesTotalCount > 0;
+  const hasProperty = data.propertiesTotalCount > 0;
 
   const priorityAction = getPriorityAction({
-    currentStage: profile.currentStage,
+    currentStage: data.profile.currentStage,
     hasProperty,
-    propertiesLoadFailed,
-    checklistOverviews,
+    propertiesLoadFailed: data.propertiesLoadFailed,
+    checklistOverviews: data.checklistOverviews,
   });
 
   const summaryCounts = {
-    ...computeHomeSummaryCounts(properties, activityHistory, checklistOverviews),
+    ...computeHomeSummaryCounts(data.properties, data.activityHistory, data.checklistOverviews),
     // items(최대 100개)가 아니라 totalElements 기준 - 매물이 100개를 넘어도 정확한 값을 보여준다.
-    interestedPropertyCount: propertiesTotalCount,
+    interestedPropertyCount: data.propertiesTotalCount,
   };
-  const signalProperties = properties.filter((property) => (property.checkSignalCount ?? 0) > 0);
-  const specialTermsAlerts = activityHistory.filter((item) => item.type === '특약사항 분석');
+  const signalProperties = data.properties.filter((property) => (property.checkSignalCount ?? 0) > 0);
+  const specialTermsAlerts = data.activityHistory.filter((item) => item.type === '특약사항 분석');
 
   return (
     <div className="container mx-auto max-w-5xl px-4 py-6 md:py-10">
-      {profileNotFound && <AccountUnavailableRedirect />}
+      {data.profileNotFound && <AccountUnavailableRedirect />}
 
       <div className="mb-8">
         <h1 className="ansim-page-title mb-2">계약 전 확인할 항목을 정리했어요</h1>
@@ -155,8 +219,8 @@ export default async function Page({ searchParams }: HomePageProps) {
         </div>
       )}
 
-      {loadError && (
-        <div className="ansim-card mb-8 border-red-100 bg-red-50 p-4 text-sm text-red-700">{loadError}</div>
+      {data.loadError && (
+        <div className="ansim-card mb-8 border-red-100 bg-red-50 p-4 text-sm text-red-700">{data.loadError}</div>
       )}
 
       <PriorityActionCard action={priorityAction} />
@@ -201,9 +265,9 @@ export default async function Page({ searchParams }: HomePageProps) {
         </div>
       </div>
 
-      {checklistProgressEntries.length > 0 && (
+      {data.checklistProgressEntries.length > 0 && (
         <div className="mb-10 space-y-4">
-          {checklistProgressEntries.map((entry) => (
+          {data.checklistProgressEntries.map((entry) => (
             <ChecklistProgressWidget
               key={entry.propertyId}
               propertyTitle={entry.propertyTitle}
@@ -261,5 +325,19 @@ export default async function Page({ searchParams }: HomePageProps) {
         참고용 설명입니다. 실제 계약 전에는 등기부등본, 보증보험 가능 여부, 전문가 검토를 함께 확인하세요.
       </NoticeBox>
     </div>
+  );
+}
+
+export default function Page() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-[50vh] items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
+        </div>
+      }
+    >
+      <HomePageContent />
+    </Suspense>
   );
 }

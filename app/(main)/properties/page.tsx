@@ -1,28 +1,13 @@
-import { cookies } from 'next/headers';
+'use client';
+
+import { Loader2 } from 'lucide-react';
+import { useSearchParams } from 'next/navigation';
+import { Suspense, useEffect, useState } from 'react';
 import { ApiError } from '../../lib/api/http';
 import { getProperties, type GetPropertiesParams } from '../../services/properties';
 import { type PropertyTransactionTypeDto, type PropertyTypeDto } from '../../types/api';
 import { type PropertyListPage } from '../../types/domain';
 import { PropertiesClient, type PropertiesFilter } from './PropertiesClient';
-
-export const dynamic = 'force-dynamic';
-
-type PageProps = {
-  searchParams: Promise<{
-    notice?: string;
-    page?: string;
-    region?: string;
-    minArea?: string;
-    maxArea?: string;
-    transactionType?: string;
-    propertyType?: string;
-    minDeposit?: string;
-    maxDeposit?: string;
-    minMonthlyRent?: string;
-    maxMonthlyRent?: string;
-    sort?: string;
-  }>;
-};
 
 // BE 기본값(20)과 별개로, 목록 화면 UI상 한 페이지에 보여줄 카드 개수는 FE가 정한다.
 const PAGE_SIZE = 5;
@@ -49,22 +34,20 @@ function parsePositiveNumber(value: string | undefined): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-export default async function Page({ searchParams }: PageProps) {
-  const cookieHeader = (await cookies()).toString();
-  const {
-    notice,
-    page: pageParam,
-    region,
-    minArea,
-    maxArea,
-    transactionType,
-    propertyType,
-    minDeposit,
-    maxDeposit,
-    minMonthlyRent,
-    maxMonthlyRent,
-    sort,
-  } = await searchParams;
+function PropertiesPageContent() {
+  const searchParams = useSearchParams();
+  const notice = searchParams.get('notice') ?? undefined;
+  const region = searchParams.get('region') ?? undefined;
+  const minArea = searchParams.get('minArea') ?? undefined;
+  const maxArea = searchParams.get('maxArea') ?? undefined;
+  const transactionTypeParam = searchParams.get('transactionType') ?? undefined;
+  const propertyTypeParam = searchParams.get('propertyType') ?? undefined;
+  const minDeposit = searchParams.get('minDeposit') ?? undefined;
+  const maxDeposit = searchParams.get('maxDeposit') ?? undefined;
+  const minMonthlyRent = searchParams.get('minMonthlyRent') ?? undefined;
+  const maxMonthlyRent = searchParams.get('maxMonthlyRent') ?? undefined;
+  const sortParam = searchParams.get('sort') ?? undefined;
+  const pageParam = searchParams.get('page') ?? undefined;
 
   // 잘못되거나 없는 page 값은 0페이지로 취급 - URL을 직접 건드려도 안전하게 첫 페이지를 보여준다.
   const parsedPage = Number(pageParam);
@@ -75,34 +58,85 @@ export default async function Page({ searchParams }: PageProps) {
     region: region?.trim() ? region.trim() : undefined,
     minArea: parsePositiveNumber(minArea),
     maxArea: parsePositiveNumber(maxArea),
-    transactionType: VALID_TRANSACTION_TYPES.includes(transactionType as PropertyTransactionTypeDto)
-      ? (transactionType as PropertyTransactionTypeDto)
+    transactionType: VALID_TRANSACTION_TYPES.includes(transactionTypeParam as PropertyTransactionTypeDto)
+      ? (transactionTypeParam as PropertyTransactionTypeDto)
       : undefined,
-    propertyType: VALID_PROPERTY_TYPES.includes(propertyType as PropertyTypeDto)
-      ? (propertyType as PropertyTypeDto)
+    propertyType: VALID_PROPERTY_TYPES.includes(propertyTypeParam as PropertyTypeDto)
+      ? (propertyTypeParam as PropertyTypeDto)
       : undefined,
     minDeposit: parsePositiveNumber(minDeposit),
     maxDeposit: parsePositiveNumber(maxDeposit),
     minMonthlyRent: parsePositiveNumber(minMonthlyRent),
     maxMonthlyRent: parsePositiveNumber(maxMonthlyRent),
-    sort: sort && VALID_SORT_VALUES.includes(sort) ? sort : undefined,
+    sort: sortParam && VALID_SORT_VALUES.includes(sortParam) ? sortParam : undefined,
   };
 
-  const requestParams: GetPropertiesParams = { page, size: PAGE_SIZE, ...filter };
+  const [propertyPage, setPropertyPage] = useState<PropertyListPage>(emptyPage);
+  const [loadError, setLoadError] = useState<string | undefined>(undefined);
+  const [loading, setLoading] = useState(true);
 
-  let propertyPage: PropertyListPage = emptyPage;
-  let loadError: string | undefined;
+  const filterKey = JSON.stringify(filter);
 
-  try {
-    propertyPage = await getProperties(cookieHeader, requestParams);
-  } catch (error) {
-    const errorBody = error instanceof ApiError ? error.body : null;
-    if (errorBody && errorBody.code === 'PROPERTY_INVALID_SEARCH_CONDITION') {
-      loadError = errorBody.message;
-    } else {
-      loadError = '매물 정보를 불러오지 못했습니다. API 설정을 확인해 주세요.';
-    }
+  useEffect(() => {
+    let cancelled = false;
+    // page/filterKey가 바뀌어 이 effect가 재실행될 때만 의미 있는 재설정이다(최초 실행 시 초기값과
+    // 동일) - 필터/페이지 변경 시 새 로딩 상태를 보여줘야 하므로 의도적으로 동기 호출한다.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoading(true);
+    const requestParams: GetPropertiesParams = { page, size: PAGE_SIZE, ...filter };
+
+    getProperties(undefined, requestParams)
+      .then((result) => {
+        if (!cancelled) {
+          setPropertyPage(result);
+          setLoadError(undefined);
+        }
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error('Failed to load properties', error);
+        const errorBody = error instanceof ApiError ? error.body : null;
+        if (errorBody && errorBody.code === 'PROPERTY_INVALID_SEARCH_CONDITION') {
+          setLoadError(errorBody.message);
+        } else if (error instanceof ApiError && error.sessionRefreshOutcome === 'unreachable') {
+          // 세션 확인 자체(자동 refresh 시도)가 네트워크/CORS 문제로 실패한 경우 - 배포 직후
+          // 설정 오류를 "매물 정보 없음"과 구분해 진단하기 쉽게 한다.
+          setLoadError('서버와 통신할 수 없습니다. 잠시 후 다시 시도해 주세요.');
+        } else {
+          setLoadError('매물 정보를 불러오지 못했습니다. API 설정을 확인해 주세요.');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, filterKey]);
+
+  if (loading) {
+    return (
+      <div className="flex min-h-[50vh] items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
+      </div>
+    );
   }
 
   return <PropertiesClient propertyPage={propertyPage} loadError={loadError} notice={notice} filter={filter} />;
+}
+
+export default function Page() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-[50vh] items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
+        </div>
+      }
+    >
+      <PropertiesPageContent />
+    </Suspense>
+  );
 }
