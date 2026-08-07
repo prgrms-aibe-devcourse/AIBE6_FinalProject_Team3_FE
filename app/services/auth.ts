@@ -75,8 +75,11 @@ export async function updatePassword(input: PasswordUpdateInput): Promise<void> 
   });
 }
 
-// 개발 편의용 "관리자로 로그인" 버튼 전용. 백엔드가 DEV_LOGIN_ENABLED=false(기본값)면 404를
-// 반환하므로, 이 함수 자체는 운영에서 호출돼도 아무 계정에도 로그인시키지 못한다.
-export async function devLogin(): Promise<MeResponseDto> {
-  return requestJson<MeResponseDto>('/auth/dev-login', { method: 'POST' });
+// 개발 편의용 "관리자로 로그인" 버튼 전용. 백엔드가 DEV_LOGIN_ENABLED=false(기본값)거나 key가
+// DEV_LOGIN_SECRET과 일치하지 않으면 404를 반환하므로, 이 함수 자체는 운영에서 key 없이 호출돼도
+// 아무 계정에도 로그인시키지 못한다. key는 쿼리 파라미터가 아니라 헤더로 보낸다 - 쿼리스트링은
+// 서버 액세스 로그/프록시 로그/브라우저 히스토리에 평문으로 남기 쉬워 공유 비밀값에 부적절하다.
+export async function devLogin(key?: string | null): Promise<MeResponseDto> {
+  const headers: HeadersInit = key ? { 'X-Dev-Login-Key': key } : {};
+  return requestJson<MeResponseDto>('/auth/dev-login', { method: 'POST', headers });
 }

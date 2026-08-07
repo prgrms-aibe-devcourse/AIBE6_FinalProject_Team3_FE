@@ -2,9 +2,9 @@
 
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { ApiError } from '../lib/api/http';
 import { sanitizeNextPath } from '../lib/nextPath';
 import { hasRegisteredProfile } from '../lib/profile';
+import { resolveErrorMessage } from '../lib/resolveErrorMessage';
 import { login } from '../services/auth';
 import { getMyProfile } from '../services/user';
 
@@ -24,6 +24,7 @@ export function LoginFormClient({ next }: LoginFormClientProps) {
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (isSubmitting) return;
 
     setIsSubmitting(true);
     setError(undefined);
@@ -46,11 +47,7 @@ export function LoginFormClient({ next }: LoginFormClientProps) {
       router.push(destination);
       router.refresh();
     } catch (submitError) {
-      setError(
-        submitError instanceof ApiError
-          ? submitError.message
-          : '로그인에 실패했습니다. 잠시 후 다시 시도해 주세요.',
-      );
+      setError(resolveErrorMessage(submitError, '로그인에 실패했습니다. 잠시 후 다시 시도해 주세요.'));
     } finally {
       setIsSubmitting(false);
     }

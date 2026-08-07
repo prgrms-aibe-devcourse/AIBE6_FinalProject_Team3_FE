@@ -291,6 +291,7 @@ export function ChecklistClient({ propertyId, checklist, initialSummary, loadErr
                       onBlur={(event) => handleMarkInsufficient(item, event.target.value)}
                       placeholder="어떤 점이 미흡했나요? (선택)"
                       rows={2}
+                      maxLength={255}
                       className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                     />
                   )}

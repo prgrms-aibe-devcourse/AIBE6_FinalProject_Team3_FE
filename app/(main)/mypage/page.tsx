@@ -92,7 +92,7 @@ export default function Page() {
 
       const checklistProgressByPropertyId: Record<number, ChecklistProgress> = {};
       try {
-        const checklistOverviews = await getMyChecklistOverviews();
+        const checklistOverviews = (await getMyChecklistOverviews()).items;
         checklistOverviews.forEach((overview) => {
           checklistProgressByPropertyId[overview.propertyId] = { status: overview.status };
         });
@@ -102,9 +102,7 @@ export default function Page() {
             overview.status !== 'NOT_STARTED' && overview.checklistId !== null,
         );
         try {
-          const summaries = await Promise.all(
-            withResult.map((overview) => getChecklistResult(overview.checklistId)),
-          );
+          const summaries = await Promise.all(withResult.map((overview) => getChecklistResult(overview.checklistId)));
           withResult.forEach((overview, index) => {
             checklistProgressByPropertyId[overview.propertyId] = {
               status: overview.status,

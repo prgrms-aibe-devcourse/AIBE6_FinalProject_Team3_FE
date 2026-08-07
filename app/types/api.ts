@@ -33,7 +33,7 @@ export type PropertySummaryDto = {
   marketDelta: string;
   checkSignalCount: number;
   signalSummary: string;
-  jeonseRatio: string;
+  jeonseRatio: number;
   checklistProgress: number;
   statusTone: ApiStatusTone;
   latitude: number;
@@ -174,6 +174,35 @@ export type ContractAnalysisResultDto = {
   disclaimer: string;
 };
 
+// POST /contract-analysis/chat. 조항 카드 안 미니 채팅에서 쓰는 추가 질문 - 이 조항 하나에 한정된
+// 대화라 clause 원문/위험여부/설명을 매번 같이 실어 보내고(서버 무저장 정책과 같은 이유로 이전 대화도
+// history로 들고 다님), 조항 카드 밖의 다른 대화와는 섞이지 않는다.
+export type ContractChatClauseContext = {
+  originalText: string;
+  riskFlag: boolean;
+  explanation: string;
+};
+
+export type ContractChatHistoryEntry = {
+  question: string;
+  answer: string;
+};
+
+export type ContractChatRequestDto = {
+  clause: ContractChatClauseContext;
+  question: string;
+  history?: ContractChatHistoryEntry[];
+};
+
+// 응답 형태는 명세받은 게 없어 analyzeContract 응답(ContractAnalysisResultDto)과 같은 패턴으로
+// 맞춰 추정했다 - answer 하나에 aiGeneratedNotice/disclaimer가 매 답변마다 같이 내려온다고 가정.
+// 실제 백엔드 응답이 다르면 이 타입과 mapper만 고치면 된다.
+export type ContractChatResponseDto = {
+  answer: string;
+  aiGeneratedNotice: string;
+  disclaimer: string;
+};
+
 export type ActivityHistoryItemDto = {
   title: string;
   type: string;
@@ -186,7 +215,10 @@ export type MeResponseDto = {
   email: string | null;
   nickname: string;
   profileImageUrl: string | null;
-  role: string;
+  // AdminRoleDto('USER' | 'ADMIN')와 같은 값이다 - admin 게이트 3곳(MainLayoutGate, (main)/layout.tsx,
+  // admin/layout.tsx)이 전부 이 필드 하나로 관리자 여부를 판단하는데, 예전엔 그냥 string이라
+  // 오타("Admin" 등)나 백엔드 계약 변경을 컴파일 타임에 전혀 못 잡았다.
+  role: AdminRoleDto;
 };
 
 export type PasswordPolicyDto = {
@@ -277,6 +309,8 @@ export type CreatePropertyRequestDto = {
   deposit: number;
   monthlyRent?: number | null;
   area: number;
+  // 선택 입력 - 관리비 없는 매물도 있어 생략 가능. 값이 있으면 0 이상이어야 한다(BE @PositiveOrZero).
+  maintenanceFee?: number | null;
   description?: string | null;
   images?: PropertyImageDto[];
 };
@@ -344,6 +378,8 @@ export type PropertyListItemDto = {
   deposit: number;
   monthlyRent: number | null;
   area: number;
+  // 관리비 없는 매물이면 null.
+  maintenanceFee: number | null;
   roadAddress: string | null;
   jibunAddress: string | null;
   status: PropertyStatusDto;
@@ -351,6 +387,12 @@ export type PropertyListItemDto = {
   // 체크리스트를 아예 시작 안 했으면 null(분모가 없음), 시작했으면 0~100 사이 정수(반올림).
   checklistProgress: number | null;
   marketComparison: MarketComparisonDto;
+  // risk-analysis를 한 번도 안 돌린 매물이면 null(0건과 구분됨), 돌렸다면 실제 발견된 신호 개수.
+  checkSignalCount: number | null;
+  // checkSignalCount가 0 이하이면 null. 발견된 신호들의 설명을 이어붙인 요약 문자열.
+  signalSummary: string | null;
+  // DepositSafetyCheck.status가 CALCULATED일 때만 값 존재(percent 정수, "%" 미포함).
+  jeonseRatio: number | null;
 };
 
 export type PropertyDetailAddressDto = {
@@ -369,6 +411,8 @@ export type PropertyDetailResponseDto = {
   deposit: number;
   monthlyRent: number | null;
   area: number;
+  // 관리비 없는 매물이면 null.
+  maintenanceFee: number | null;
   description: string | null;
   address: PropertyDetailAddressDto;
   images: PropertyImageDto[];
@@ -390,6 +434,8 @@ export type UpdatePropertyRequestDto = {
   deposit: number;
   monthlyRent?: number | null;
   area: number;
+  // 선택 입력 - 관리비 없는 매물도 있어 생략 가능. 값이 있으면 0 이상이어야 한다(BE @PositiveOrZero).
+  maintenanceFee?: number | null;
   description?: string | null;
   images?: PropertyImageDto[];
 };
@@ -608,7 +654,6 @@ export type DepositSafetyCheckDto = {
   propertyId: number;
   status: DepositSafetyStatusDto | null; // 한 번도 계산 안 됐으면 null (자동 트리거 덕분에 실사용에선 거의 안 생김)
   jeonseRatio: number | null;
-  // 아래 3개는 재계산(이번 스코프 제외) 전용 필드지만 Backend가 항상 이 shape으로 내려주므로 타입엔 남긴다.
   seniorDepositApplied: boolean;
   seniorDeposit: number | null;
   maxClaimAmount: number | null;
@@ -618,4 +663,11 @@ export type DepositSafetyCheckDto = {
   calculatedAt: string | null;
   disclaimer: string;
   recentOwnershipChangeWarning: boolean;
+};
+
+// POST /properties/{propertyId}/deposit-safety/recalculate 요청. seniorDeposit(선순위보증금)은
+// 필수, maxClaimAmount(근저당 채권최고액)는 선택 - 둘 다 원(KRW) 단위 정수.
+export type DepositSafetyRecalculateRequestDto = {
+  seniorDeposit: number;
+  maxClaimAmount?: number;
 };

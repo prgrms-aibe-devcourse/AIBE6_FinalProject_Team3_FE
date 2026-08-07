@@ -360,7 +360,7 @@ export function PropertiesClient({ propertyPage, loadError, notice, filter }: Pr
                     <Badge className="bg-slate-100 text-slate-500">신호 확인 준비 중</Badge>
                   )}
                   {property.jeonseRatio !== undefined ? (
-                    <Badge className="bg-slate-100 text-slate-600">전세가율 {property.jeonseRatio}</Badge>
+                    <Badge className="bg-slate-100 text-slate-600">전세가율 {property.jeonseRatio}%</Badge>
                   ) : (
                     <Badge className="bg-slate-100 text-slate-500">전세가율 준비 중</Badge>
                   )}

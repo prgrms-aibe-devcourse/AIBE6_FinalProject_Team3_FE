@@ -6,6 +6,7 @@ import { ArrowRight, CheckCircle2, Shield } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { landingFeatures, landingSummaryItems } from './data/landing';
 import { DevLoginButton } from './DevLoginButton';
+import { captureDevLoginKeyFromUrl, getStoredDevLoginKey } from './lib/devLoginKey';
 import { isLoggedIn as checkIsLoggedIn } from './services/auth';
 import { Badge } from './ui/Badge';
 import { FeatureCard } from './ui/FeatureCard';
@@ -17,11 +18,25 @@ export default function Page() {
   // getCurrentUser()와 달리 실패해도 로그인 화면으로 강제 이동시키지 않는다 - 로그인한 적 없는
   // 첫 방문자가 그냥 공개 페이지를 봤을 뿐인데 튕기면 안 되기 때문.
   const [loggedIn, setLoggedIn] = useState(false);
+  // DevLoginButton이 자기 자신의 effect에서 getStoredDevLoginKey()를 따로 읽으면, "먼저 저장하고
+  // 나중에 읽기"가 서로 다른 컴포넌트의 effect 사이 순서에 의존하게 된다 - React는 자식 effect를
+  // 부모 effect보다 먼저 실행하므로, 자식인 DevLoginButton이 이 페이지의 캡처 effect보다 먼저
+  // localStorage를 읽어버려 방금 들어온 `#devkey=` 부트스트랩 링크에서도 버튼이 숨는 문제가 생길 수
+  // 있다. 캡처와 조회를 이 effect 하나 안에서 순서대로 실행해 그 경쟁을 원천적으로 없앤다.
+  const [devLoginKey, setDevLoginKey] = useState<string | null>(null);
 
   useEffect(() => {
+    // `/#devkey=...` 부트스트랩 링크로 들어온 경우 dev-login 열쇠를 localStorage에 저장하고
+    // 즉시 URL에서 지운다(devLoginKey.ts 참고) - 이 키가 없어도 일반 방문자에게는 영향 없다.
+    // setDevLoginKey는 effect 본문에서 바로 부르지 않고 아래 .then() 안에서 부른다 - effect 본문에서
+    // setState를 동기 호출하면 린트 규칙(react-hooks/set-state-in-effect)에 걸린다.
+    captureDevLoginKeyFromUrl();
+
     let cancelled = false;
     checkIsLoggedIn().then((result) => {
-      if (!cancelled) setLoggedIn(result);
+      if (cancelled) return;
+      setLoggedIn(result);
+      setDevLoginKey(getStoredDevLoginKey());
     });
     return () => {
       cancelled = true;
@@ -123,7 +138,7 @@ export default function Page() {
       </section>
 
       <div className="pb-6 text-center">
-        <DevLoginButton />
+        <DevLoginButton devLoginKey={devLoginKey} />
       </div>
     </div>
   );

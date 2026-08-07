@@ -1,21 +1,43 @@
 'use client';
 
 import { Loader2 } from 'lucide-react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { parsePageParam } from '../../../lib/pageParam';
+import { resolveErrorMessage } from '../../../lib/resolveErrorMessage';
 import { getAdminUsers } from '../../../services/admin';
 import { getCurrentUser } from '../../../services/auth';
 import { type AdminUserListItemDto, type PageResponseDto } from '../../../types/api';
 import { AdminUsersClient } from './AdminUsersClient';
 
 function AdminUsersPageContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const page = parsePageParam(searchParams.get('page') ?? undefined);
   const email = searchParams.get('email') ?? undefined;
   const nickname = searchParams.get('nickname') ?? undefined;
   const role = searchParams.get('role') ?? undefined;
   const status = searchParams.get('status') ?? undefined;
+
+  // 유저 상태/권한 변경으로 필터에 맞는 항목이 하나 줄면, 지금 보고 있던 페이지가 더 이상
+  // 존재하지 않게 될 수 있다(예: 2페이지에 1명 남아있던 걸 정지 처리 → 2페이지는 빈 목록).
+  // 목록 갱신 없이는 Pagination 자체가 사라져(totalPages<=1) 되돌아갈 UI 수단이 없으므로,
+  // 응답의 totalPages를 기준으로 유효 범위를 벗어나면 자동으로 마지막 유효 페이지로 되돌린다.
+  const clampToValidPage = useCallback(
+    (totalPages: number) => {
+      const validPage = totalPages > 0 ? Math.min(page, totalPages - 1) : 0;
+      if (validPage === page) return false;
+      const query = new URLSearchParams(searchParams.toString());
+      if (validPage) {
+        query.set('page', String(validPage));
+      } else {
+        query.delete('page');
+      }
+      router.replace(`/admin/users${query.toString() ? `?${query.toString()}` : ''}`);
+      return true;
+    },
+    [page, router, searchParams],
+  );
 
   const [data, setData] = useState<PageResponseDto<AdminUserListItemDto> | undefined>(undefined);
   const [loadError, setLoadError] = useState<string | undefined>(undefined);
@@ -37,14 +59,20 @@ function AdminUsersPageContent() {
     return getAdminUsers({ page, email, nickname, role, status })
       .then((usersPage) => {
         if (requestId !== requestIdRef.current) return;
+        // 지금 페이지가 이 결과 기준으로 더 이상 유효하지 않으면, 빈 목록을 잠깐 보여주는 대신
+        // 유효한 페이지로 리다이렉트한다(그 리다이렉트가 URL을 바꿔 이 effect를 다시 실행시킨다).
+        if (clampToValidPage(usersPage.totalPages)) return;
         setData(usersPage);
         setLoadError(undefined);
       })
-      .catch(() => {
+      .catch((error) => {
         if (requestId !== requestIdRef.current) return;
-        setLoadError('유저 목록을 불러오지 못했습니다.');
+        // data를 그대로 두면 에러 배너 아래 이전(어쩌면 다른 필터의) 목록이 최신인 것처럼 계속
+        // 보인다 - 실패했으면 화면에는 에러만 남긴다.
+        setData(undefined);
+        setLoadError(resolveErrorMessage(error, '유저 목록을 불러오지 못했습니다.'));
       });
-  }, [page, email, nickname, role, status]);
+  }, [page, email, nickname, role, status, clampToValidPage]);
 
   useEffect(() => {
     let cancelled = false;

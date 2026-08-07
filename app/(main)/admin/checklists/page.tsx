@@ -2,6 +2,7 @@
 
 import { Loader2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { resolveErrorMessage } from '../../../lib/resolveErrorMessage';
 import { getAdminChecklistItemTemplates } from '../../../services/admin';
 import { type AdminChecklistItemTemplateDto } from '../../../types/api';
 import { AdminChecklistTemplatesClient } from './AdminChecklistTemplatesClient';
@@ -26,9 +27,12 @@ export default function AdminChecklistsPage() {
         setData(result);
         setLoadError(undefined);
       })
-      .catch(() => {
+      .catch((error) => {
         if (requestId !== requestIdRef.current) return;
-        setLoadError('체크리스트 문항을 불러오지 못했습니다.');
+        // data를 그대로 두면 에러 배너 아래 이전 목록이 최신인 것처럼 계속 보인다 - 실패했으면
+        // 화면에는 에러만 남긴다.
+        setData(undefined);
+        setLoadError(resolveErrorMessage(error, '체크리스트 문항을 불러오지 못했습니다.'));
       });
   }, []);
 

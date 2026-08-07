@@ -102,7 +102,7 @@ properties/PropertiesClient    검색/필터 상태 관리
 - `PropertyReportModal.tsx`: 매물 신고 모달
 - `ChecklistClient.tsx`: 체크 상태 변경(optimistic update)
 - `ChecklistOverviewClient.tsx`: 내 체크리스트 목록 카드
-- `ContractResultClient.tsx`: 탭 전환
+- `ContractResultClient.tsx`: 마스킹 확인 → AI 분석 호출/로딩 → 결과 탭 전환·아코디언·조항별 미니 채팅
 - `ProfileClient.tsx`: 프로필 등록/수정 폼(관심지역 3단 select, 닉네임 중복확인)
 - `LoginFormClient.tsx` / `SignupFormClient.tsx` / `PasswordUpdateFormClient.tsx`: 인증 폼
 - `MainLayoutClient.tsx`: 상단/하단 네비게이션, 로그아웃

@@ -27,6 +27,11 @@ export function PropertyEditClient({ propertyId, property, loadError }: Property
     property?.monthlyRentAmount ? formatIntegerInput(String(property.monthlyRentAmount)) : '',
   );
   const [area, setArea] = useState(property?.area !== undefined ? formatDecimalInput(String(property.area)) : '');
+  // 관리비 0(관리비 없음으로 명시)과 null(입력 안 함)을 구분해야 하므로 falsy 체크(?)가 아니라
+  // != null로 프리필 여부를 판단한다 - monthlyRentAmount처럼 0이 "값 없음"과 같은 의미가 아니다.
+  const [maintenanceFee, setMaintenanceFee] = useState(
+    property?.maintenanceFeeAmount != null ? formatIntegerInput(String(property.maintenanceFeeAmount)) : '',
+  );
   const [description, setDescription] = useState(property?.description ?? '');
   const [images, setImages] = useState<PropertyImage[]>(property?.images ?? []);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -76,6 +81,16 @@ export function PropertyEditClient({ propertyId, property, loadError }: Property
       }
     }
 
+    // 관리비는 선택 입력 - 비워두면 null(관리비 자체를 안 물어본 상태), 입력하면 0 이상이어야 한다.
+    let maintenanceFeeNumber: number | null = null;
+    if (maintenanceFee.trim().length > 0) {
+      maintenanceFeeNumber = Number(maintenanceFee.replace(/,/g, ''));
+      if (Number.isNaN(maintenanceFeeNumber) || maintenanceFeeNumber < 0) {
+        setError('관리비를 올바르게 입력해주세요.');
+        return;
+      }
+    }
+
     setIsSubmitting(true);
     try {
       await updateProperty(propertyId, {
@@ -83,6 +98,7 @@ export function PropertyEditClient({ propertyId, property, loadError }: Property
         deposit: depositNumber,
         monthlyRent: monthlyRentNumber,
         area: areaNumber,
+        maintenanceFee: maintenanceFeeNumber,
         description: description.trim().length > 0 ? description.trim() : null,
         images,
       });
@@ -172,6 +188,17 @@ export function PropertyEditClient({ propertyId, property, loadError }: Property
                   disabled={isSubmitting}
                   className="ansim-input disabled:opacity-60"
                   placeholder="예: 42.5"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-2 block text-sm font-bold text-slate-700">관리비 (원, 선택)</span>
+                <input
+                  value={maintenanceFee}
+                  onChange={(event) => setMaintenanceFee(formatIntegerInput(event.target.value))}
+                  inputMode="numeric"
+                  disabled={isSubmitting}
+                  className="ansim-input disabled:opacity-60"
+                  placeholder="예: 100,000"
                 />
               </label>
             </div>

@@ -1,9 +1,10 @@
 'use client';
 
 import { Loader2 } from 'lucide-react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { parsePageParam } from '../../../lib/pageParam';
+import { resolveErrorMessage } from '../../../lib/resolveErrorMessage';
 import { getAdminPropertyReports } from '../../../services/admin';
 import { type AdminPropertyReportListItemDto, type PageResponseDto } from '../../../types/api';
 import { AdminReportsClient } from './AdminReportsClient';
@@ -12,11 +13,32 @@ import { AdminReportsClient } from './AdminReportsClient';
 // 우선 보여준다. 사용자가 명시적으로 "전체"를 고르면 status=ALL로 남겨 다음 새로고침에서도
 // 그 선택이 유지되게 한다(그냥 파라미터를 지우면 다시 RECEIVED로 되돌아가버린다).
 function AdminReportsPageContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const page = parsePageParam(searchParams.get('page') ?? undefined);
   const selectedStatus = searchParams.get('status') ?? 'RECEIVED';
   const apiStatus = selectedStatus === 'ALL' ? undefined : selectedStatus;
   const reason = searchParams.get('reason') ?? undefined;
+
+  // 신고 처리(조치완료/반려)로 필터에 맞는 항목이 하나 줄면, 지금 보고 있던 페이지가 더 이상
+  // 존재하지 않게 될 수 있다(예: 2페이지에 1건 남아있던 걸 처리 → 2페이지는 빈 목록). 목록
+  // 갱신 없이는 Pagination 자체가 사라져(totalPages<=1) 되돌아갈 UI 수단이 없으므로, 응답의
+  // totalPages를 기준으로 유효 범위를 벗어나면 자동으로 마지막 유효 페이지로 되돌린다.
+  const clampToValidPage = useCallback(
+    (totalPages: number) => {
+      const validPage = totalPages > 0 ? Math.min(page, totalPages - 1) : 0;
+      if (validPage === page) return false;
+      const query = new URLSearchParams(searchParams.toString());
+      if (validPage) {
+        query.set('page', String(validPage));
+      } else {
+        query.delete('page');
+      }
+      router.replace(`/admin/reports${query.toString() ? `?${query.toString()}` : ''}`);
+      return true;
+    },
+    [page, router, searchParams],
+  );
 
   const [data, setData] = useState<PageResponseDto<AdminPropertyReportListItemDto> | undefined>(undefined);
   const [loadError, setLoadError] = useState<string | undefined>(undefined);
@@ -36,14 +58,20 @@ function AdminReportsPageContent() {
     return getAdminPropertyReports({ page, status: apiStatus, reason })
       .then((result) => {
         if (requestId !== requestIdRef.current) return;
+        // 지금 페이지가 이 결과 기준으로 더 이상 유효하지 않으면, 빈 목록을 잠깐 보여주는 대신
+        // 유효한 페이지로 리다이렉트한다(그 리다이렉트가 URL을 바꿔 이 effect를 다시 실행시킨다).
+        if (clampToValidPage(result.totalPages)) return;
         setData(result);
         setLoadError(undefined);
       })
-      .catch(() => {
+      .catch((error) => {
         if (requestId !== requestIdRef.current) return;
-        setLoadError('신고 목록을 불러오지 못했습니다.');
+        // data를 그대로 두면 에러 배너 아래 이전(어쩌면 다른 필터의) 목록이 최신인 것처럼 계속
+        // 보인다 - 실패했으면 화면에는 에러만 남긴다.
+        setData(undefined);
+        setLoadError(resolveErrorMessage(error, '신고 목록을 불러오지 못했습니다.'));
       });
-  }, [page, apiStatus, reason]);
+  }, [page, apiStatus, reason, clampToValidPage]);
 
   useEffect(() => {
     let cancelled = false;

@@ -1,9 +1,12 @@
 'use client';
 
+import { useState } from 'react';
 import { AlertTriangle, ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import { apiStatusToneClassMap, getJeonseRatioTone, riskSignalTypeMeta } from '../../../../data/risk-analysis';
 import { cn } from '../../../../lib/cn';
+import { formatIntegerInput } from '../../../../lib/numberFormat';
+import { recalculateDepositSafety } from '../../../../services/risk-analysis';
 import { type DepositSafetyCheck, type PropertyDetail, type RiskSignalList } from '../../../../types/domain';
 import { Badge } from '../../../../ui/Badge';
 import { NoticeBox } from '../../../../ui/NoticeBox';
@@ -25,10 +28,45 @@ const statusLabelMap: Record<'success' | 'undeterminable' | 'failed', string> = 
 export function RiskAnalysisClient({
   propertyId,
   riskSignals,
-  depositSafety,
+  depositSafety: initialDepositSafety,
   loadError,
   property,
 }: RiskAnalysisClientProps) {
+  // 재계산 결과로 화면을 갱신해야 해서 prop을 그대로 안 쓰고 로컬 state로 옮겨 담는다.
+  const [depositSafety, setDepositSafety] = useState(initialDepositSafety);
+  const [seniorDeposit, setSeniorDeposit] = useState('');
+  const [maxClaimAmount, setMaxClaimAmount] = useState('');
+  const [isRecalculating, setIsRecalculating] = useState(false);
+  const [recalculateError, setRecalculateError] = useState<string | null>(null);
+
+  async function handleRecalculate() {
+    setRecalculateError(null);
+    const seniorDepositNumber = Number(seniorDeposit.replace(/,/g, ''));
+    if (!seniorDeposit || Number.isNaN(seniorDepositNumber) || seniorDepositNumber < 0) {
+      setRecalculateError('선순위보증금을 올바르게 입력해주세요.');
+      return;
+    }
+
+    const maxClaimAmountNumber = maxClaimAmount ? Number(maxClaimAmount.replace(/,/g, '')) : undefined;
+    if (maxClaimAmountNumber !== undefined && (Number.isNaN(maxClaimAmountNumber) || maxClaimAmountNumber < 0)) {
+      setRecalculateError('근저당 채권최고액을 올바르게 입력해주세요.');
+      return;
+    }
+
+    setIsRecalculating(true);
+    try {
+      const updated = await recalculateDepositSafety(propertyId, {
+        seniorDeposit: seniorDepositNumber,
+        maxClaimAmount: maxClaimAmountNumber,
+      });
+      setDepositSafety(updated);
+    } catch {
+      setRecalculateError('재계산에 실패했습니다. 잠시 후 다시 시도해주세요.');
+    } finally {
+      setIsRecalculating(false);
+    }
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 pb-24">
       <div className="sticky top-0 z-30 border-b border-slate-200 bg-white">
@@ -115,14 +153,49 @@ export function RiskAnalysisClient({
                     최근 소유권이 바뀐 매물이에요 — 더 꼼꼼히 확인하세요.
                   </NoticeBox>
                 )}
+
+                <div className="rounded-xl border border-slate-200 p-4">
+                  <p className="mb-3 text-xs font-bold text-slate-700">
+                    선순위보증금을 반영하면 더 정확하게 계산할 수 있어요
+                  </p>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <label className="block">
+                      <span className="mb-1 block text-xs text-slate-500">선순위보증금 (원)</span>
+                      <input
+                        value={seniorDeposit}
+                        onChange={(event) => setSeniorDeposit(formatIntegerInput(event.target.value))}
+                        inputMode="numeric"
+                        disabled={isRecalculating}
+                        className="ansim-input disabled:opacity-60"
+                        placeholder="예: 50,000,000"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-xs text-slate-500">근저당 채권최고액 (원, 선택)</span>
+                      <input
+                        value={maxClaimAmount}
+                        onChange={(event) => setMaxClaimAmount(formatIntegerInput(event.target.value))}
+                        inputMode="numeric"
+                        disabled={isRecalculating}
+                        className="ansim-input disabled:opacity-60"
+                        placeholder="예: 30,000,000"
+                      />
+                    </label>
+                  </div>
+                  {recalculateError && <p className="mt-2 text-xs text-red-600">{recalculateError}</p>}
+                  <button
+                    type="button"
+                    onClick={() => void handleRecalculate()}
+                    disabled={isRecalculating}
+                    className="ansim-button-secondary mt-3 w-full py-2 text-sm disabled:opacity-60"
+                  >
+                    {isRecalculating ? '재계산 중...' : '반영해서 다시 계산하기'}
+                  </button>
+                </div>
               </>
             ) : (
               <p className="mb-4 text-sm text-slate-500">{depositSafety.reasonText ?? '확인할 수 없어요.'}</p>
             )}
-
-            <div className="rounded-xl border border-dashed border-slate-200 p-4 text-center text-xs text-slate-400">
-              선순위보증금을 반영하면 더 정확하게 계산할 수 있어요 (곧 지원 예정)
-            </div>
           </div>
         )}
 

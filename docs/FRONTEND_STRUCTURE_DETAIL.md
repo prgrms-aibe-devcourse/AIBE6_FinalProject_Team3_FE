@@ -64,7 +64,7 @@ mock DTO는 `app/mocks/init`에만 둡니다. 화면 구성용 정적 데이터�
 - 백엔드 DTO와 같은 형태의 초기 mock 응답
 - `PropertySummaryDto`
 - `ChecklistItemDto`
-- `ContractRiskItemDto`
+- `ContractAnalysisResultDto`(`ContractClauseDto[]` 포함)
 
 즉, `data`는 UI 구성 데이터이고 `mocks/init`은 API 응답 흉내입니다.
 
@@ -258,7 +258,11 @@ GET  /properties/{id}
 POST /properties
 GET  /checklists/template?tradeType=전세
 POST /checklists
-POST /contracts/special-terms/analyze
+POST /contract-analysis/inputs
+POST /contract-analysis/ocr
+POST /contract-analysis/masking
+POST /contract-analysis/analyze
+POST /contract-analysis/chat
 GET  /mypage
 ```
 

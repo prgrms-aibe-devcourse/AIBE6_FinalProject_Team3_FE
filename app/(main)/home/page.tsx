@@ -120,7 +120,7 @@ function HomePageContent() {
 
       let checklistOverviews: ChecklistOverview[] = [];
       try {
-        checklistOverviews = await getMyChecklistOverviews();
+        checklistOverviews = (await getMyChecklistOverviews()).items;
       } catch (error) {
         if (isSessionInvalidError(error)) {
           router.push('/login?error=session_expired');

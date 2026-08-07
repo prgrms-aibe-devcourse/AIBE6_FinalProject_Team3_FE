@@ -73,11 +73,11 @@ Backend `docs/specs/auth-design.md`와 같은 성격의 **요구사항 명세서
 | --- | --- | --- |
 | Access/Refresh 만료 시간 분리 | O | Backend 책임, FE 범위 밖 |
 | Refresh Token을 HttpOnly/Secure/SameSite 쿠키로 관리 | O | Backend 책임 — FE는 `credentials: 'include'`로 쿠키를 자동 첨부하는 것만 담당, 속성 자체는 확인 불가 |
-| Refresh Token을 Local Storage에 저장하지 않음 | O | ✅ 전체 소스에 `localStorage`/`sessionStorage` 사용 자체가 없음(grep 확인) |
+| Refresh Token을 Local Storage에 저장하지 않음 | O | ✅ refresh/access 토큰은 httpOnly 쿠키로만 관리되고 `localStorage`/`sessionStorage`에는 저장되지 않음. 다만 dev-login 전용 부트스트랩 키(`DEV_LOGIN_SECRET`)는 `localStorage`에 저장됨(`devLoginKey.ts`) — 이건 실제 인증 토큰이 아니라 개발 편의 기능의 보조 값이라 이 요구사항의 대상은 아님 |
 | 서명키/소셜 인증키를 소스코드에 미포함 | O | ✅ FE는 `NEXT_PUBLIC_KAKAO_MAP_APP_KEY`(지도용 공개 키)만 env로 노출하고, OAuth client secret/JWT 서명키는 애초에 FE에 존재하지 않음 |
 | 인증 실패 사유 과다 노출 방지 | O | ⚠️ FE는 백엔드가 내려준 메시지를 그대로 표시만 함 — 메시지 수위 조절은 전적으로 백엔드 책임, FE 자체 필터링 없음 |
 | 운영 환경 HTTPS | O | 배포 인프라 영역, FE 코드 범위 밖 |
-| 이해 가능한 오류 메시지 | O | ⚠️ 부분적 — URL 파라미터 기반 에러(`oauth_login_failed`, `session_expired`)는 FE가 직접 한글 매핑(`ERROR_MESSAGES`), 로그인/회원가입 폼 실패는 백엔드 메시지 그대로 노출 |
+| 이해 가능한 오류 메시지 | O | ⚠️ 부분적 — URL 파라미터 기반 에러(`oauth_login_failed`, `session_expired`, `session_unavailable`, `account_blocked`, `email_conflict`, `social_account_conflict`, `token_issue_failed`)는 FE가 직접 한글 매핑(`login/page.tsx`의 `ERROR_MESSAGES`), 로그인/회원가입 폼 실패는 백엔드 메시지 그대로 노출 |
 | Access Token 만료 시 자동 재발급 시도 | O | ⚠️ 위 "토큰 재발급" 표 참고 — 화면 전환 시점만 커버, 클라이언트 사이드 호출 전반은 미커버 |
 | Refresh Token까지 만료 시 재로그인 안내 | O | ✅ `/login`으로 리다이렉트 |
 | 소셜 로그인 실패 시 재시도 가능 | O | ✅ `/login` 화면에 구글/카카오 버튼이 항상 노출돼 있어 실패해도 즉시 재시도 가능 |

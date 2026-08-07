@@ -26,6 +26,7 @@ export function PasswordUpdateFormClient({ hasPassword, passwordPolicy }: Passwo
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (isSaving) return;
 
     if (newPassword !== confirmNewPassword) {
       // Enter 키로 제출된 경우 브라우저의 암묵적 제출 처리가 포커스를 되돌려놓기 때문에,

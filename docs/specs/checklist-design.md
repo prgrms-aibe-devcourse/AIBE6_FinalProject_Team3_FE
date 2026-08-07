@@ -12,7 +12,7 @@
 | ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | `app/(main)/properties/[id]/checklist/page.tsx` + `ChecklistClient.tsx` | 체크리스트 생성/조회/항목확인/결과확인 화면                                                                                            |
 | `app/(main)/checklists/page.tsx` + `ChecklistOverviewClient.tsx`        | 매물별 체크리스트 현황 목록 (요구사항엔 없는 화면 — 아래 "추가 구현" 참고)                                                             |
-| `app/services/checklist.ts`                                             | `POST/GET /properties/{id}/checklists`, `PATCH /checklists/{id}/items/{itemId}`, `GET /checklists/{id}/result`, `GET /checklists` 호출 |
+| `app/services/checklist.ts`                                             | `POST/GET /properties/{id}/checklists`, `PATCH /checklists/{id}/items/{itemId}`, `GET /checklists/{id}/result`, `GET /checklists`(2026-08-06부터 페이지네이션 파라미터 지원) 호출 |
 | `app/data/checklist.ts`                                                 | 5개 카테고리 탭 정의(아이콘/이름/순서)                                                                                                 |
 
 ## 체크리스트 생성 — 요구사항 대비
@@ -77,7 +77,7 @@
 
 ## 요구사항에 없던 추가 구현
 
-- **`GET /checklists`("내 체크리스트 목록") 및 `/checklists` 화면** — Backend 문서에도 동일하게 명시됨: 요구사항 명세서엔 없는 엔드포인트/화면. 매물마다 진입점이 따로 없어 상단 네비게이션 "현장 체크" 메뉴가 갈 곳이 없었던 문제를 해결하기 위해 오늘 추가함
+- **`GET /checklists`("내 체크리스트 목록") 및 `/checklists` 화면** — Backend 문서에도 동일하게 명시됨: 요구사항 명세서엔 없는 엔드포인트/화면. 매물마다 진입점이 따로 없어 상단 네비게이션 "현장 체크" 메뉴가 갈 곳이 없었던 문제를 해결하기 위해 추가함. **(2026-08-06 갱신)** Backend가 이 엔드포인트를 배열 대신 `PageResponse<ChecklistOverviewResponse>`로 응답하도록 바꾸면서, FE도 `ChecklistOverviewPage` 도메인 타입 도입 + `getMyChecklistOverviews({ page })` + 매물 목록(`PropertiesClient`)과 동일한 `<Link>` 기반 이전/다음 페이지 UI를 `/checklists` 화면에 추가해 대응함. `size`/`sort`는 보내지 않고 Backend 기본값(페이지 크기 20, 최종 점검일 최신순 고정 정렬)을 그대로 따름. mock 모드는 실제 API처럼 페이지가 나뉘는 걸 눈으로 확인할 수 있도록 5개씩 잘라서 흉내냄(mock 매물 데이터도 3개 → 20개로 확장)
 - **CHECK 항목의 "완료/미흡 + 메모"** — 요구사항은 CHECK 항목을 단순 체크(확인/미확인)로만 전제하는데, 실제 구현은 "완료"/"미흡" 2버튼 + 미흡 시 텍스트 메모(`userNote`)까지 지원. `hasIssue = issueFound(서버 자동 판단) || userNote != null(사용자 주관적 표시)`로 병합해서 "주의 항목" 카운트 하나로 통일해 보여줌
 - **"특약사항 분석하기" CTA 버튼** — 요구사항엔 도메인 간 이동 흐름 언급이 없음. **(2026-07-30 변경)** 원래는 필수 항목을 모두 채워야만(`missingRequiredCount === 0 && hasStarted`) 나타났는데, 매물 상세 화면에 이미 "체크리스트 시작"/"특약사항 분석하기"가 독립된 버튼으로 나란히 있다는 점과 상충된다고 판단(브레인스토밍 결론)해서 조건 없이 항상 노출로 바꿈. 문구도 "다음 단계: 특약사항 분석하기"(순차 진행 암시) → "특약사항도 AI로 분석해보세요"(독립 추천)로 변경
 - **체크리스트 상세 헤더의 매물 정보 표시**(2026-07-29 추가) — 요구사항엔 없지만, 목록 화면에서 여러 매물의 체크리스트를 오갈 수 있게 되면서 "지금 보고 있는 게 어느 매물인지" 표시가 필요해져 추가함

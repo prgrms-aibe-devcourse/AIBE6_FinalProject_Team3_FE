@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { MapPin } from 'lucide-react';
-import { type ChecklistOverview } from '../../types/domain';
+import { ChevronLeft, ChevronRight, MapPin } from 'lucide-react';
+import { type ChecklistOverview, type ChecklistOverviewPage } from '../../types/domain';
 import { Badge } from '../../ui/Badge';
 
 const statusLabelMap: Record<ChecklistOverview['status'], string> = {
@@ -18,11 +18,13 @@ const statusColorMap: Record<ChecklistOverview['status'], string> = {
 };
 
 type ChecklistOverviewClientProps = {
-  overviews: ChecklistOverview[];
+  checklistPage: ChecklistOverviewPage;
   loadError?: string;
 };
 
-export function ChecklistOverviewClient({ overviews, loadError }: ChecklistOverviewClientProps) {
+export function ChecklistOverviewClient({ checklistPage, loadError }: ChecklistOverviewClientProps) {
+  const { items, page, totalPages } = checklistPage;
+
   return (
     <div className="min-h-screen bg-slate-50 pb-20">
       <div className="border-b border-slate-200 bg-white py-10">
@@ -37,7 +39,7 @@ export function ChecklistOverviewClient({ overviews, loadError }: ChecklistOverv
           <div className="ansim-card mb-4 border-red-100 bg-red-50 p-4 text-sm text-red-700">{loadError}</div>
         )}
 
-        {!loadError && overviews.length === 0 && (
+        {!loadError && items.length === 0 && (
           <div className="ansim-card flex flex-col items-center gap-4 p-8 text-center text-sm text-slate-500">
             등록된 매물이 없습니다. 매물을 먼저 등록해 주세요.
             <Link href="/properties/register" className="ansim-button-primary px-5 py-3">
@@ -47,7 +49,7 @@ export function ChecklistOverviewClient({ overviews, loadError }: ChecklistOverv
         )}
 
         <div className="grid grid-cols-1 gap-4">
-          {overviews.map((overview) => (
+          {items.map((overview) => (
             <Link
               key={overview.propertyId}
               href={`/properties/${overview.propertyId}/checklist`}
@@ -69,6 +71,38 @@ export function ChecklistOverviewClient({ overviews, loadError }: ChecklistOverv
             </Link>
           ))}
         </div>
+
+        {!loadError && totalPages > 1 && (
+          <div className="mt-6 flex items-center justify-center gap-4">
+            {page > 0 ? (
+              <Link
+                href={`/checklists?page=${page - 1}`}
+                className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-600 transition hover:bg-slate-50"
+              >
+                <ChevronLeft className="h-4 w-4" /> 이전
+              </Link>
+            ) : (
+              <span className="flex items-center gap-1 rounded-xl border border-slate-100 px-4 py-2 text-sm font-bold text-slate-300">
+                <ChevronLeft className="h-4 w-4" /> 이전
+              </span>
+            )}
+            <span className="text-sm text-slate-500">
+              {page + 1} / {totalPages} 페이지
+            </span>
+            {checklistPage.hasNext ? (
+              <Link
+                href={`/checklists?page=${page + 1}`}
+                className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-600 transition hover:bg-slate-50"
+              >
+                다음 <ChevronRight className="h-4 w-4" />
+              </Link>
+            ) : (
+              <span className="flex items-center gap-1 rounded-xl border border-slate-100 px-4 py-2 text-sm font-bold text-slate-300">
+                다음 <ChevronRight className="h-4 w-4" />
+              </span>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

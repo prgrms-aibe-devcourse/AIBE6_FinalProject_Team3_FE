@@ -44,6 +44,7 @@
 | 삭제된 매물 제외 | Backend 책임(ACTIVE 상태만 응답) — FE는 별도 필터링 없이 그대로 신뢰 |
 | 페이지네이션 | ✅ BE가 `PageResponse`로 응답이 바뀌면서 `getProperties(cookieHeader, { page })`가 `page`/`size`/`sort` 쿼리 파라미터를 지원하게 됨. `PropertiesClient`에 이전/다음 페이지 링크(`?page=N`) 추가, 페이지 이동 시 현재 필터 조건도 그대로 유지됨(`buildPageHref`) |
 | 성공: 목록 + 지도 마커 | ⚠️ 목록 카드는 나오지만 지도 마커 표시는 이 화면에 없음(상세 화면에만 `KakaoMap` 있음) |
+| 확인 필요 신호 개수 / 전세가율 배지 | ✅ `PropertiesClient`/`PropertyListItem`의 조건부 렌더링은 이전부터 있었으나, BE 응답(`PropertyListItemDto`)에 필드 자체가 없어 항상 "준비 중"만 보였음 — BE에 `checkSignalCount`/`signalSummary`/`jeonseRatio` 필드가 추가되면서 실제 값으로 연동됨. `jeonseRatio`는 BE가 percent 정수만 내려주는 컨벤션이라 FE 타입을 `string`→`number`로 정정하고 "%" 포맷팅을 FE에서 붙이도록 수정(`getJeonseRatioDisplay`) |
 | 검색 결과 없음 → 빈 목록 | ✅ "조건에 맞는 매물이 없습니다" 문구 |
 | 실패: 인증 실패/잘못된 검색 조건 | ✅ 인증 실패는 `(main)/layout.tsx`가 상위에서 처리(Auth 문서 참고). "잘못된 검색 조건"(면적/보증금/월세 범위의 최소값이 최대값보다 큰 경우)은 BE의 `PROPERTY_INVALID_SEARCH_CONDITION` 에러 메시지를 그대로 화면에 노출 |
 
@@ -54,7 +55,7 @@
 | 매물 존재/접근 권한 확인 | Backend 책임 — FE는 응답 실패 시 "매물을 찾을 수 없습니다"로 통합 표시 |
 | 기본 정보 + 주소 정보 조회 | ✅ |
 | 실거래가 비교 결과 조회 | ✅ `priceHistory`/`marketDelta` 있으면 차트로, 없으면 "아직 실거래가 비교 정보가 없어요" |
-| 위험 신호·안전성 정보 조회 | ⚠️ 응답에 해당 필드가 없으면(현재는 항상 없음 — risk-analysis 도메인 미연동) "준비 중" 배지 + 정적 안내 문구로 대체. 실제 데이터 연동 여부는 이 도메인 범위 밖 |
+| 위험 신호·안전성 정보 조회 | ✅ **연동됨.** `PropertyDetailResponse`엔 관련 필드가 없지만, `page.tsx`가 매물 상세를 불러올 때 `GET /risk-signals`/`GET /deposit-safety`를 별도로 호출해 `PropertyDetailClient`의 "확인 필요 신호"/"보증금 안전성" 카드를 채운다. 목록은 N개 매물을 한 번에 다뤄야 해서 `PropertyListResponse`에 요약 필드를 넣었지만, 상세는 매물 1건만 보면 되므로 별도 API 호출 2건으로 충분해 이렇게 설계된 것으로 보임. 한 번도 계산된 적 없는 매물(`depositSafety.status === 'notChecked'`)이면 `POST /risk-analysis`를 자동 트리거해 계산 후 다시 조회 |
 | 임장 체크리스트 생성 여부 확인 | ✅ BE 응답의 `checklistCreated`를 반영해 버튼 문구가 "현장 체크리스트 시작" / "현장 체크리스트 이어보기"로 갈림 |
 | 누적 신고 여부(존재 유무) 조회 | ✅ BE 응답의 `reported`(본인 신고 여부)를 반영해 신고 버튼이 비활성화되고 "이미 신고한 매물이에요" 배너가 뜸. 이번 세션에서 막 신고한 경우(`reportSuccess`)도 동일하게 취급 |
 | 신고 내용 원문/신고자 정보 비노출 | N/A — 신고 여부(boolean)만 받아오고 신고 내역 자체는 조회하지 않으므로 노출될 것도 없음 |
@@ -135,6 +136,6 @@
 5. ~~상세 화면이 "체크리스트 진행 여부"와 "신고 누적 여부"를 서버에서 조회해서 보여주지 않음~~ → BE에 `checklistCreated`/`reported` 필드가 추가되면서 해소됨(위 상세조회 표 참고)
 6. ~~매물 삭제 확인이 앱 자체 `Modal` 대신 브라우저 `window.confirm()`~~ → **`PropertyDeleteConfirmModal`(신고 모달과 동일한 `Modal` 기반 패턴)로 교체됨**
 7. **목록/상세에 보이는 매물 제목이 실제 저장값이 아님** — `mapPropertyListItemDto`/`mapPropertyDetailResponseDto`(`app/mappers/property.ts`)가 `propertyType`만 보고 `"오피스텔 매물"`처럼 그때그때 만들어내는 문자열이다. BE `Property`에 `title` 컬럼이 아예 없어서 벌어지는 일(`property-design.md`(BE) 18번 참고) — BE에 `title` 컬럼 추가가 합의됐고, 별도 이슈로 진행되면 등록 폼에 제목 입력 필드 추가 + 이 자동생성 로직 제거가 함께 필요함
-8. **관리비(`maintenance`) 필드가 요구사항 명세에 없는데 UI엔 표시 슬롯이 남아있음** — BE `Property` 요구사항 필드 목록(id/userId/address/propertyType/transactionType/deposit/monthlyRent/askingPrice/area/status)에 관리비가 없고, 실제 BE 엔티티에도 대응 컬럼이 없다. FE `PropertySummary`/`PropertyDetail`엔 `maintenance?: string` 필드가 있고 목록 카드는 `property.maintenance ?? '관리비 정보 없음'`으로 무조건 렌더링해서 실사용 매물마다 "관리비 정보 없음"만 항상 찍힘. 팀 논의 결과 추후 실제로 쓸 가능성이 있어 일단 유지하기로 함 — BE에 컬럼이 추가되면 그때 register/edit 폼 입력란 + 매퍼 연결이 함께 필요함
+8. ~~관리비(`maintenance`) 필드가 요구사항 명세에 없는데 UI엔 표시 슬롯이 남아있음~~ → **BE `Property`에 `maintenanceFee`(nullable Long) 컬럼이 추가되면서 해소됨.** 등록/수정 폼에 관리비 입력란(선택, 0 이상)이 생겼고, `mapPropertyListItemDto`/`mapPropertyDetailResponseDto`(`app/mappers/property.ts`)의 `formatMaintenanceText`가 `null`(입력 안 함) → `undefined`, `0`(명시적으로 관리비 없음) → `"관리비 없음"`, 양수 → `"관리비 N만원"`으로 구분해서 채운다. 목록 카드/상세 화면 렌더링 로직 자체는 이미 `property.maintenance` 조건부 렌더링을 갖추고 있어서 변경 없이 그대로 실데이터를 받게 됐다.
 9. ~~매물 목록 카드의 "체크리스트" 칸이 항상 "준비 중"~~ → **BE `PropertyListResponse.checklistProgress`(체크리스트 미시작 시 null, 시작했으면 0~100 반올림 정수) 추가 + FE `mapPropertyListItemDto`에서 `PropertySummary.checklist`로 연결하며 해소됨.** BE는 `ChecklistItemRepository.findProgressByUserId`가 유저 전체 체크리스트 문항을 `property.id` 기준 GROUP BY로 한 번에 집계하는 방식이라 매물 개수와 무관하게 쿼리 1회, N+1 없음. **"시세 대비" 칸은 여전히 "준비 중"** — `PropertySummary.marketDelta`는 실제 API가 채우지 않는 필드로 남아있음(`types/domain.ts` 참고). 시세 대비(실거래가)는 국토부/카카오 API를 매물마다 동기 호출해야 해서 캐싱 없이 목록에 붙이면 페이지 로딩이 크게 느려짐 — 캐싱(Redis 등) 도입 후로 보류
 10. ~~매물 목록 카드 오른쪽의 "주소 중복 확인/보증금 수치 확인/현장 점검" 3개 칩이 완전히 정적 UI~~ → **제거됨.** 어떤 매물 데이터와도 연결되지 않고 항상 동일한 아이콘·색·문구로 표시돼 실제로 확인/완료된 것처럼 오해를 줄 수 있었음. 같은 작업에서 매물 상세 화면(모바일 상단바)의 공유/찜(하트) 버튼도 함께 제거함 — `onClick`이 없어 눌러도 아무 동작을 안 했고, 코드베이스 전체에 찜/공유 기능을 구현한 흔적이 전혀 없어 완전히 장식용으로 남아있던 상태였음

@@ -5,6 +5,10 @@ import { getMockContractAnalysisResult } from '../repositories/contractAnalysisR
 import {
   type ContractAnalysisResultDto,
   type ContractAnalyzeRequestDto,
+  type ContractChatClauseContext,
+  type ContractChatHistoryEntry,
+  type ContractChatRequestDto,
+  type ContractChatResponseDto,
   type ContractInputResponseDto,
   type ContractMaskingRequestDto,
   type ContractMaskingResponseDto,
@@ -100,4 +104,26 @@ export async function analyzeContract(maskedText: string, userConfirmed: boolean
   });
 
   return mapContractAnalysisResultDto(dto);
+}
+
+// 조항 카드 안 미니 채팅용 추가 질문. 조항 하나에 한정된 대화라 매 호출마다 그 조항의 원문/위험여부/
+// 설명(clause)과 그동안의 대화(history)를 통째로 실어 보낸다 - 서버가 아무 것도 저장하지 않는
+// 정책이라 다른 단계들과 동일한 패턴이다.
+export async function sendContractClauseQuestion(
+  clause: ContractChatClauseContext,
+  question: string,
+  history?: ContractChatHistoryEntry[],
+): Promise<ContractChatResponseDto> {
+  if (useMockData) {
+    return {
+      answer: '지금은 mock 모드라 실제 AI 답변 대신 예시 문구를 보여드리고 있어요.',
+      aiGeneratedNotice: '이 답변은 AI가 자동으로 생성한 참고용 정보입니다.',
+      disclaimer: '본 답변은 참고 정보이며 법률 자문이나 계약 안전을 보장하지 않습니다.',
+    };
+  }
+
+  return requestJson<ContractChatResponseDto>('/contract-analysis/chat', {
+    method: 'POST',
+    body: JSON.stringify({ clause, question, history } satisfies ContractChatRequestDto),
+  });
 }

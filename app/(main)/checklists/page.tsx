@@ -1,22 +1,44 @@
 'use client';
 
 import { Loader2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { Suspense, useEffect, useState } from 'react';
 import { ApiError } from '../../lib/api/http';
+import { parsePageParam } from '../../lib/pageParam';
 import { getMyChecklistOverviews } from '../../services/checklist';
-import { type ChecklistOverview } from '../../types/domain';
+import { type ChecklistOverviewPage } from '../../types/domain';
 import { ChecklistOverviewClient } from './ChecklistOverviewClient';
 
-export default function Page() {
-  const [overviews, setOverviews] = useState<ChecklistOverview[]>([]);
+const emptyPage: ChecklistOverviewPage = {
+  items: [],
+  page: 0,
+  size: 20,
+  totalElements: 0,
+  totalPages: 0,
+  hasNext: false,
+};
+
+function ChecklistsPageContent() {
+  const searchParams = useSearchParams();
+  const page = parsePageParam(searchParams.get('page') ?? undefined);
+
+  const [checklistPage, setChecklistPage] = useState<ChecklistOverviewPage>(emptyPage);
   const [loadError, setLoadError] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
-    getMyChecklistOverviews()
+    // page가 바뀌어 이 effect가 재실행될 때만 의미 있는 재설정이다(최초 실행 시 초기값과 동일) -
+    // 페이지 변경 시 새 로딩 상태를 보여줘야 하므로 의도적으로 동기 호출한다.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoading(true);
+
+    getMyChecklistOverviews({ page })
       .then((result) => {
-        if (!cancelled) setOverviews(result);
+        if (!cancelled) {
+          setChecklistPage(result);
+          setLoadError(undefined);
+        }
       })
       .catch((error) => {
         if (cancelled) return;
@@ -32,10 +54,11 @@ export default function Page() {
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
+
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [page]);
 
   if (loading) {
     return (
@@ -45,5 +68,19 @@ export default function Page() {
     );
   }
 
-  return <ChecklistOverviewClient overviews={overviews} loadError={loadError} />;
+  return <ChecklistOverviewClient checklistPage={checklistPage} loadError={loadError} />;
+}
+
+export default function Page() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-[50vh] items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
+        </div>
+      }
+    >
+      <ChecklistsPageContent />
+    </Suspense>
+  );
 }

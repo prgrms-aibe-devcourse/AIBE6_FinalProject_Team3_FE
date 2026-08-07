@@ -39,20 +39,31 @@ export default function Page() {
       });
 
     // 위험 신호/보증금 안전성은 매물 상세의 부가 정보라, 조회 실패해도 매물 본문은 그대로 보여준다.
-    checkRiskSignals(propertyId)
-      .then(() => getRiskSignals(propertyId))
-      .then((signals) => {
-        if (!cancelled) setRiskSignals(signals);
+    // 한 번도 계산된 적 없는 매물만 POST /risk-analysis로 트리거한다(risk-analysis/page.tsx와 동일한
+    // 이유 - checkAndSave가 매번 선순위보증금 없이 재계산해서, 이미 계산된 매물을 매번 재트리거하면
+    // 사용자가 recalculate로 입력해둔 선순위보증금이 이 페이지를 다시 볼 때마다 지워진다). 신호/보증금
+    // 안전성은 checkAndSave(property) 한 트랜잭션에서 항상 같이 upsert되므로, depositSafety.status가
+    // notChecked인지로 "둘 다 한 번도 계산된 적 없음"을 판별한다.
+    Promise.all([getRiskSignals(propertyId), getDepositSafety(propertyId)])
+      .then(([signals, safety]) => {
+        if (safety.status === 'notChecked') {
+          return checkRiskSignals(propertyId).then(() =>
+            Promise.all([getRiskSignals(propertyId), getDepositSafety(propertyId)]),
+          );
+        }
+        return [signals, safety] as const;
+      })
+      .then(([signals, safety]) => {
+        if (!cancelled) {
+          setRiskSignals(signals);
+          setDepositSafety(safety);
+        }
       })
       .catch(() => {
-        if (!cancelled) setRiskSignals(undefined);
-      });
-    getDepositSafety(propertyId)
-      .then((safety) => {
-        if (!cancelled) setDepositSafety(safety);
-      })
-      .catch(() => {
-        if (!cancelled) setDepositSafety(undefined);
+        if (!cancelled) {
+          setRiskSignals(undefined);
+          setDepositSafety(undefined);
+        }
       });
 
     return () => {

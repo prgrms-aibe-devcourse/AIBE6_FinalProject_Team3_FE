@@ -3,6 +3,7 @@
 import { Loader2 } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState } from 'react';
+import { resolveErrorMessage } from '../../lib/resolveErrorMessage';
 import { getAdminDashboardStats } from '../../services/admin';
 import { type AdminDashboardStatsDto } from '../../types/api';
 import { AdminDashboardClient } from './AdminDashboardClient';
@@ -44,8 +45,8 @@ function AdminPageContent() {
           setLoadError(undefined);
         }
       })
-      .catch(() => {
-        if (!cancelled) setLoadError('통계를 불러오지 못했습니다. 조회 기간을 확인해주세요.');
+      .catch((error) => {
+        if (!cancelled) setLoadError(resolveErrorMessage(error, '통계를 불러오지 못했습니다. 조회 기간을 확인해주세요.'));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

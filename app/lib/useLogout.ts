@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { resetAuthRefreshState } from './api/http';
 import { logout } from '../services/auth';
 
 // MainLayoutClient.tsx(헤더)와 MyPageClient.tsx 양쪽에서 거의 동일한 로그아웃 처리 로직이
@@ -41,8 +42,18 @@ export function useLogout() {
     }
     setIsLoggingOut(true);
     setLogoutError(undefined);
+    // 회귀 방지 - requestJson()의 refreshInFlight/lastRefreshSucceededAt은 탭(모듈) 단위라
+    // 로그아웃 후에도 이전 세션의 refresh가 남아있을 수 있다. 공유/키오스크 기기에서 같은 탭에
+    // 바로 다른 계정으로 로그인하면, 그 남은 refresh의 늦은 응답이 새 로그인의 쿠키를 덮어쓰거나
+    // 새 요청이 남의 refresh 결과를 기다리게 될 수 있다. logoutOnce()가 끝난 뒤에만 리셋하면
+    // 늦지 않냐는 지적이 있었다 - 정확히 그렇다. 쿠키를 실제로 덮어쓰는 주체는 JS 상태가 아니라
+    // 브라우저의 네트워크 응답 처리라서, /auth/logout을 보내기 "전에" 먼저 진행 중이던 refresh를
+    // abort시켜야 그 응답 자체가 도착하지 않는다. 성공 후에도 한 번 더 불러, logout 호출 도중에
+    // 새로 시작된 refresh(예: 다른 컴포넌트의 401)까지 마저 정리한다.
+    resetAuthRefreshState();
     try {
       await logoutOnce();
+      resetAuthRefreshState();
       router.push('/login');
     } catch {
       setLogoutError('로그아웃하지 못했습니다. 잠시 후 다시 시도해 주세요.');

@@ -3,7 +3,7 @@
 import { Loader2 } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect } from 'react';
-import { ApiError } from '../../lib/api/http';
+import { isUnreachableError } from '../../lib/api/http';
 import { sanitizeNextPath } from '../../lib/nextPath';
 import { hasRegisteredProfile } from '../../lib/profile';
 import { getCurrentUser } from '../../services/auth';
@@ -18,7 +18,16 @@ const OAUTH_NEXT_COOKIE = 'oauth_next';
 function consumeOAuthNextCookie(): string | null {
   const match = document.cookie.match(new RegExp(`(?:^|; )${OAUTH_NEXT_COOKIE}=([^;]*)`));
   document.cookie = `${OAUTH_NEXT_COOKIE}=; path=/; max-age=0; samesite=lax`;
-  return match ? decodeURIComponent(match[1]) : null;
+  if (!match) return null;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    // 정상 경로(SocialLoginLinks)는 항상 encodeURIComponent로 저장하므로 여기 도달하지 않는다 -
+    // 다만 이 쿠키는 httpOnly가 아니라 사용자가 직접 조작하거나 깨진 값이 남을 수 있는 값이라,
+    // decodeURIComponent가 malformed percent-encoding에서 던지는 URIError로 콜백 흐름 전체가
+    // 멈추면 안 된다. 못 읽는 값은 "next 없음"과 동일하게 취급한다.
+    return null;
+  }
 }
 
 function OAuthCallbackContent() {
@@ -59,13 +68,10 @@ function OAuthCallbackContent() {
         // OAuth를 마치고 돌아온 첫 진입점이라, CORS/쿠키 설정이 미묘하게 틀렸을 때 원인 진단이
         // 가장 필요한 지점인데 정작 아무 로그도 없이 "다시 로그인하세요"만 보이면 안 된다.
         console.error('OAuth callback: failed to confirm session', error);
-        // 'unreachable'(네트워크 오류 등으로 refresh 자체를 시도 못한 경우)과 세션이 실제로
-        // 무효인 경우를 구분해서 보내야, 배포 초기 CORS/쿠키 설정 오류를 "로그인 정보가
-        // 만료됐다"는 잘못된 안내로 덮지 않는다.
-        const errorParam =
-          error instanceof ApiError && error.sessionRefreshOutcome === 'unreachable'
-            ? 'session_unavailable'
-            : 'session_expired';
+        // 네트워크 오류/CORS 차단(최초 fetch 실패 또는 refresh 실패, isUnreachableError 참고)과
+        // 세션이 실제로 무효인 경우를 구분해서 보내야, 배포 초기 CORS/쿠키 설정 오류를 "로그인
+        // 정보가 만료됐다"는 잘못된 안내로 덮지 않는다.
+        const errorParam = isUnreachableError(error) ? 'session_unavailable' : 'session_expired';
         const loginUrl = new URL('/login', window.location.origin);
         loginUrl.searchParams.set('error', errorParam);
         // 위 error 분기와 동일한 이유로 next를 살려둔다 — rawNext가 있을 때만 붙여서, 애초에

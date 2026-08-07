@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useRef, useState } from 'react';
-import { ApiError } from '../lib/api/http';
+import { resolveErrorMessage } from '../lib/resolveErrorMessage';
 import { signup } from '../services/auth';
 import { checkNicknameAvailability } from '../services/user';
 import { type PasswordPolicyDto } from '../types/api';
@@ -29,10 +29,6 @@ export function SignupFormClient({ passwordPolicy }: SignupFormClientProps) {
 
   const handleCheckNickname = async () => {
     const trimmed = nickname.trim();
-    if (trimmed.length < 2) {
-      setNicknameCheckStatus('error');
-      return;
-    }
 
     setNicknameCheckStatus('checking');
     setNicknameRequiredError(false);
@@ -46,6 +42,7 @@ export function SignupFormClient({ passwordPolicy }: SignupFormClientProps) {
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (isSubmitting) return;
 
     if (password !== confirmPassword) {
       // 폼의 암묵적 제출(입력란에서 Enter) 경로는 브라우저가 포커스를 되돌릴 수 있어,
@@ -63,14 +60,15 @@ export function SignupFormClient({ passwordPolicy }: SignupFormClientProps) {
     setError(undefined);
 
     try {
-      await signup({ email, password, nickname });
+      // handleCheckNickname은 nickname.trim()으로 중복 확인을 했으므로, 여기서도 trim된 값을
+      // 보내야 한다 - 그대로 보내면 입력값에 앞뒤 공백이 남아 있을 때 "확인된 적 없는" 값이
+      // 제출되어 버린다(중복확인 통과 == 실제 제출값이라는 보장이 깨짐).
+      await signup({ email, password, nickname: nickname.trim() });
       // 방금 가입한 계정은 프로필을 등록한 적이 없으므로 곧장 등록 화면으로 보낸다.
       router.push('/mypage/profile');
       router.refresh();
     } catch (submitError) {
-      setError(
-        submitError instanceof ApiError ? submitError.message : '회원가입에 실패했습니다. 잠시 후 다시 시도해 주세요.',
-      );
+      setError(resolveErrorMessage(submitError, '회원가입에 실패했습니다. 잠시 후 다시 시도해 주세요.'));
     } finally {
       setIsSubmitting(false);
     }
