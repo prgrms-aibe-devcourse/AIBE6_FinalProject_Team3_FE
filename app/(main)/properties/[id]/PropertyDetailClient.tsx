@@ -4,8 +4,20 @@ import { useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Building2, Calendar, CheckCircle2, Flag, ImageOff, Maximize, Pencil, Trash2 } from 'lucide-react';
+import {
+  ArrowLeft,
+  Building2,
+  Calendar,
+  CheckCircle2,
+  Flag,
+  HelpCircle,
+  ImageOff,
+  Maximize,
+  Pencil,
+  Trash2,
+} from 'lucide-react';
 import { apiStatusToneClassMap, getJeonseRatioTone, riskSignalTypeMeta } from '../../../data/risk-analysis';
+import { formatAreaWithPyeong } from '../../../lib/numberFormat';
 import { roomTypeLabelMap } from '../../../mappers/property';
 import { deleteProperty } from '../../../services/properties';
 import { type DepositSafetyCheck, type PropertyDetail, type RiskSignalList } from '../../../types/domain';
@@ -40,6 +52,7 @@ export function PropertyDetailClient({ property, loadError, riskSignals, deposit
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [isJeonseRatioHelpOpen, setIsJeonseRatioHelpOpen] = useState(false);
   const [reportSuccess, setReportSuccess] = useState(false);
   const [isGalleryOpen, setIsGalleryOpen] = useState(false);
 
@@ -198,7 +211,7 @@ export function PropertyDetailClient({ property, loadError, riskSignals, deposit
 
             <div className="mb-10 grid grid-cols-2 gap-6 md:grid-cols-3">
               {[
-                [Maximize, '전용면적', property.area ? `${property.area}㎡` : '정보 없음'],
+                [Maximize, '전용면적', property.area ? formatAreaWithPyeong(property.area) : '정보 없음'],
                 [Calendar, '등록일', property.createdAt ?? '정보 없음'],
               ].map(([Icon, label, value]) => {
                 const TypedIcon = Icon as typeof Maximize;
@@ -243,6 +256,13 @@ export function PropertyDetailClient({ property, loadError, riskSignals, deposit
                       인근 실거래 {property.marketComparison.sampleCount}건 기준 (반경{' '}
                       {property.marketComparison.radiusMeters}m)
                     </p>
+                    {typeof property.marketComparison.areaErrorRate === 'number' &&
+                      typeof property.marketComparison.lookbackMonths === 'number' && (
+                        <p className="mb-1 text-xs text-slate-400">
+                          면적오차 ±{Math.round(property.marketComparison.areaErrorRate * 100)}% · 최근{' '}
+                          {property.marketComparison.lookbackMonths}개월 실거래 기준으로 비교했어요.
+                        </p>
+                      )}
                     <p className="text-xl font-bold text-slate-950">
                       {formatDifferenceMessage(property.marketComparison.differenceRateText)}
                     </p>
@@ -317,14 +337,50 @@ export function PropertyDetailClient({ property, loadError, riskSignals, deposit
               )}
 
               {depositSafety !== undefined && (
-                <div className="mb-6 flex items-center justify-between rounded-xl bg-slate-50 p-4">
-                  <span className="text-sm font-bold text-slate-700">보증금 안전성</span>
-                  {depositSafety.status === 'calculated' && depositSafety.jeonseRatio !== null ? (
-                    <Badge className={apiStatusToneClassMap[getJeonseRatioTone(depositSafety.jeonseRatio)]}>
-                      전세가율 {depositSafety.jeonseRatio}%
-                    </Badge>
+                <div className="mb-6 rounded-xl bg-slate-50 p-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1">
+                      <span className="text-sm font-bold text-slate-700">보증금 안전성</span>
+                      <button
+                        type="button"
+                        onClick={() => setIsJeonseRatioHelpOpen(true)}
+                        aria-label="전세가율 설명 보기"
+                        className="text-slate-400 hover:text-slate-600"
+                      >
+                        <HelpCircle className="h-4 w-4" />
+                      </button>
+                    </div>
+                    {depositSafety.status === 'calculated' && depositSafety.jeonseRatio !== null ? (
+                      <Badge
+                        className={
+                          apiStatusToneClassMap[
+                            getJeonseRatioTone(
+                              depositSafety.jeonseRatio,
+                              depositSafety.cautionFrom,
+                              depositSafety.warnTo,
+                            )
+                          ]
+                        }
+                      >
+                        전세가율 {depositSafety.jeonseRatio}%
+                      </Badge>
+                    ) : (
+                      <Badge className={apiStatusToneClassMap.slate}>판정 불가</Badge>
+                    )}
+                  </div>
+                  {depositSafety.status === 'calculated' ? (
+                    <>
+                      {depositSafety.explanation && (
+                        <p className="mt-3 text-xs leading-relaxed text-slate-600">{depositSafety.explanation}</p>
+                      )}
+                      {depositSafety.referenceDate && (
+                        <p className="mt-1 text-[10px] text-slate-400">기준일: {depositSafety.referenceDate}</p>
+                      )}
+                    </>
                   ) : (
-                    <Badge className={apiStatusToneClassMap.slate}>판정 불가</Badge>
+                    depositSafety.reasonText && (
+                      <p className="mt-3 text-xs text-slate-500">{depositSafety.reasonText}</p>
+                    )
                   )}
                 </div>
               )}
@@ -342,7 +398,7 @@ export function PropertyDetailClient({ property, loadError, riskSignals, deposit
                 <Link href={`/properties/${property.id}/checklist`} className="ansim-button-primary w-full">
                   {property.checklistCreated ? '현장 체크리스트 이어보기' : '현장 체크리스트 시작'}
                 </Link>
-                <Link href="/contract/upload" className="ansim-button-secondary w-full">
+                <Link href={`/contract/upload?propertyId=${property.id}`} className="ansim-button-secondary w-full">
                   특약사항 분석하기
                 </Link>
               </div>
@@ -405,6 +461,39 @@ export function PropertyDetailClient({ property, loadError, riskSignals, deposit
         onClose={() => setIsDeleteModalOpen(false)}
         onConfirm={confirmDelete}
       />
+
+      <Modal open={isJeonseRatioHelpOpen} onClose={() => setIsJeonseRatioHelpOpen(false)}>
+        <h3 className="mb-3 text-base font-bold text-slate-950">전세가율이 뭔가요?</h3>
+        <p className="mb-3 text-sm leading-relaxed text-slate-600">
+          전세가율은 이 집을 팔았을 때 받을 수 있는 금액(매매 시세) 대비, 내가 내는 전세보증금의 비율이에요. 이 비율이
+          낮을수록 집값이 떨어지더라도 집을 팔아 보증금을 돌려받을 여지가 커요.
+        </p>
+        {depositSafety?.cautionFrom !== null &&
+        depositSafety?.cautionFrom !== undefined &&
+        depositSafety?.warnFrom !== null &&
+        depositSafety?.warnFrom !== undefined &&
+        depositSafety?.warnTo !== null &&
+        depositSafety?.warnTo !== undefined ? (
+          <ul className="mb-3 space-y-1 text-xs text-slate-500">
+            <li>{depositSafety.cautionFrom}% 미만: 안전한 편</li>
+            <li>
+              {depositSafety.cautionFrom}~{depositSafety.warnFrom}%: 주의가 필요한 편
+            </li>
+            <li>
+              {depositSafety.warnFrom}~{depositSafety.warnTo}%: 위험한 편
+            </li>
+            <li>{depositSafety.warnTo}% 초과: 입력값을 다시 확인해보세요</li>
+          </ul>
+        ) : null}
+        <p className="mb-4 text-[10px] text-slate-400">확정적인 판단이 아닌 참고용 정보예요.</p>
+        <button
+          type="button"
+          onClick={() => setIsJeonseRatioHelpOpen(false)}
+          className="ansim-button-secondary w-full py-2 text-sm"
+        >
+          확인
+        </button>
+      </Modal>
     </div>
   );
 }

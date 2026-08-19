@@ -1,7 +1,8 @@
 import { Shield } from 'lucide-react';
 import Link from 'next/link';
 import { getPasswordPolicy } from '../services/auth';
-import { type PasswordPolicyDto } from '../types/api';
+import { getNicknamePolicy } from '../services/user';
+import { type NicknamePolicyDto, type PasswordPolicyDto } from '../types/api';
 import { SignupFormClient } from './SignupFormClient';
 
 // backend가 내려오지 않는 극히 드문 경우에만 쓰는 최후의 fallback이다 — 평소엔 항상
@@ -12,10 +13,23 @@ const FALLBACK_PASSWORD_POLICY: PasswordPolicyDto = {
   message: '영문과 숫자를 포함한 8~72자의 영문/숫자/기호를 입력해 주세요. 공백은 사용할 수 없습니다.',
 };
 
+// FALLBACK_PASSWORD_POLICY와 같은 이유의 최후 fallback.
+const FALLBACK_NICKNAME_POLICY: NicknamePolicyDto = {
+  pattern: '[가-힣a-zA-Z0-9]{2,20}',
+  message: '닉네임은 한글, 영문, 숫자로 2~20자여야 합니다.',
+};
+
 export default async function SignupPage() {
   let passwordPolicy = FALLBACK_PASSWORD_POLICY;
   try {
     passwordPolicy = await getPasswordPolicy();
+  } catch {
+    // 조회 실패해도 폴백 정책으로 폼은 계속 동작해야 한다.
+  }
+
+  let nicknamePolicy = FALLBACK_NICKNAME_POLICY;
+  try {
+    nicknamePolicy = await getNicknamePolicy();
   } catch {
     // 조회 실패해도 폴백 정책으로 폼은 계속 동작해야 한다.
   }
@@ -31,7 +45,7 @@ export default async function SignupPage() {
           <p className="text-sm text-slate-600">이메일로 가입하고 바로 시작해 보세요</p>
         </div>
 
-        <SignupFormClient passwordPolicy={passwordPolicy} />
+        <SignupFormClient passwordPolicy={passwordPolicy} nicknamePolicy={nicknamePolicy} />
 
         <p className="mt-6 text-center text-sm text-slate-600">
           이미 계정이 있으신가요?{' '}
@@ -41,7 +55,7 @@ export default async function SignupPage() {
         </p>
 
         <Link href="/" className="mt-6 block text-center text-xs text-slate-400 hover:text-slate-600">
-          랜딩 페이지로 돌아가기
+          홈페이지로 돌아가기
         </Link>
       </div>
     </div>

@@ -1,8 +1,12 @@
 import { useMockData } from '../config/dataSource';
 import { requestJson } from '../lib/api/http';
 import {
+  addMockAdminChecklistTemplateImage,
+  bulkReviewMockAdminPropertyReports,
+  bulkUpdateMockAdminUserStatus,
   createMockAdminChecklistItemTemplate,
   deleteMockAdminChecklistItemTemplate,
+  deleteMockAdminChecklistTemplateImage,
   getMockAdminPropertyReportDetail,
   reviewMockAdminPropertyReport,
   updateMockAdminChecklistItemTemplate,
@@ -10,11 +14,16 @@ import {
   updateMockAdminUserStatus,
 } from '../repositories/adminRepository';
 import {
+  type AdminBulkActionResponseDto,
   type AdminChecklistItemTemplateCreateRequestDto,
   type AdminChecklistItemTemplateDto,
+  type AdminChecklistItemTemplateImageCreateRequestDto,
+  type AdminChecklistItemTemplateImageDto,
   type AdminChecklistItemTemplateUpdateRequestDto,
+  type AdminPropertyReportBulkReviewRequestDto,
   type AdminPropertyReportDetailDto,
   type AdminPropertyReportReviewRequestDto,
+  type AdminUserBulkStatusUpdateRequestDto,
   type AdminUserDetailDto,
   type AdminUserRoleUpdateRequestDto,
   type AdminUserStatusUpdateRequestDto,
@@ -58,6 +67,18 @@ export async function updateAdminUserStatus(
   });
 }
 
+export async function bulkUpdateAdminUserStatus(
+  request: AdminUserBulkStatusUpdateRequestDto,
+): Promise<AdminBulkActionResponseDto> {
+  if (useMockData) {
+    return bulkUpdateMockAdminUserStatus(request.userIds, request.status);
+  }
+  return requestJson<AdminBulkActionResponseDto>('/admin/users/bulk-status', {
+    method: 'PATCH',
+    body: JSON.stringify(request),
+  });
+}
+
 export async function getAdminPropertyReportDetail(reportId: number): Promise<AdminPropertyReportDetailDto> {
   if (useMockData) {
     return ensureFound(getMockAdminPropertyReportDetail(reportId), '신고를 찾을 수 없습니다.');
@@ -73,6 +94,18 @@ export async function reviewAdminPropertyReport(
     return ensureFound(reviewMockAdminPropertyReport(reportId, request), '신고를 찾을 수 없습니다.');
   }
   return requestJson<AdminPropertyReportDetailDto>(`/admin/property-reports/${reportId}/review`, {
+    method: 'PATCH',
+    body: JSON.stringify(request),
+  });
+}
+
+export async function bulkReviewAdminPropertyReports(
+  request: AdminPropertyReportBulkReviewRequestDto,
+): Promise<AdminBulkActionResponseDto> {
+  if (useMockData) {
+    return bulkReviewMockAdminPropertyReports(request.reportIds, { status: request.status, memo: request.memo });
+  }
+  return requestJson<AdminBulkActionResponseDto>('/admin/property-reports/bulk-review', {
     method: 'PATCH',
     body: JSON.stringify(request),
   });
@@ -95,7 +128,10 @@ export async function updateAdminChecklistItemTemplate(
   request: AdminChecklistItemTemplateUpdateRequestDto,
 ): Promise<AdminChecklistItemTemplateDto> {
   if (useMockData) {
-    return ensureFound(updateMockAdminChecklistItemTemplate(templateId, request), '체크리스트 문항을 찾을 수 없습니다.');
+    return ensureFound(
+      updateMockAdminChecklistItemTemplate(templateId, request),
+      '체크리스트 문항을 찾을 수 없습니다.',
+    );
   }
   return requestJson<AdminChecklistItemTemplateDto>(`/admin/checklist-templates/${templateId}`, {
     method: 'PATCH',
@@ -111,4 +147,27 @@ export async function deleteAdminChecklistItemTemplate(templateId: number): Prom
     return;
   }
   await requestJson<void>(`/admin/checklist-templates/${templateId}`, { method: 'DELETE' });
+}
+
+export async function addAdminChecklistTemplateImage(
+  templateId: number,
+  request: AdminChecklistItemTemplateImageCreateRequestDto,
+): Promise<AdminChecklistItemTemplateImageDto> {
+  if (useMockData) {
+    return addMockAdminChecklistTemplateImage(templateId, request);
+  }
+  return requestJson<AdminChecklistItemTemplateImageDto>(`/admin/checklist-templates/${templateId}/images`, {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+export async function deleteAdminChecklistTemplateImage(templateId: number, imageId: number): Promise<void> {
+  if (useMockData) {
+    if (!deleteMockAdminChecklistTemplateImage(templateId, imageId)) {
+      throw new Error('이미지를 찾을 수 없습니다.');
+    }
+    return;
+  }
+  await requestJson<void>(`/admin/checklist-templates/${templateId}/images/${imageId}`, { method: 'DELETE' });
 }

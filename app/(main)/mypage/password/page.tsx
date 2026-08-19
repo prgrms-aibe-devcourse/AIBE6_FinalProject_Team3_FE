@@ -3,6 +3,7 @@
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import { canSetPassword as computeCanSetPassword } from '../../../lib/profile';
 import { getPasswordPolicy } from '../../../services/auth';
 import { getMyProfile } from '../../../services/user';
 import { type PasswordPolicyDto } from '../../../types/api';
@@ -58,14 +59,11 @@ export default function PasswordUpdatePage() {
   }, []);
 
   const title = profileLoadFailed ? '비밀번호' : hasPassword ? '비밀번호 변경' : '비밀번호 설정';
-  // 로그인은 email+passwordHash 조합으로만 되므로(services/auth.ts login 참고), email이 없는
-  // 계정(카카오는 profile_nickname 스코프만 요청해 이메일 동의항목이 아직 없음)은 비밀번호를
-  // 설정해봐야 그걸로 로그인할 방법이 없다 — 이미 비밀번호가 있는 계정은 email이 반드시 있었을
-  // 때만 그렇게 될 수 있으므로 이 케이스에 해당하지 않는다. 백엔드도 동일하게 막지만(AUTH_EMAIL_
-  // REQUIRED_FOR_PASSWORD), 여기서 폼 자체를 안 보여줘야 "성공할 것처럼 보이는" UX가 안 생긴다.
-  // profileLoadFailed일 땐 email 유무를 실제로 모르므로 이 판단 자체를 보류한다(아래 렌더링에서
-  // profileLoadFailed를 먼저 확인).
-  const canSetPassword = hasPassword || email !== null;
+  // 규칙 자체(왜 email이 없으면 비밀번호를 설정할 수 없는지)는 lib/profile.ts의 canSetPassword
+  // 참고 - 백엔드도 동일하게 막지만(AUTH_EMAIL_REQUIRED_FOR_PASSWORD), 여기서 폼 자체를 안
+  // 보여줘야 "성공할 것처럼 보이는" UX가 안 생긴다. profileLoadFailed일 땐 email 유무를 실제로
+  // 모르므로 이 판단 자체를 보류한다(아래 렌더링에서 profileLoadFailed를 먼저 확인).
+  const canSetPassword = computeCanSetPassword({ hasPassword, email });
 
   return (
     <div className="min-h-screen bg-slate-50 pb-20">

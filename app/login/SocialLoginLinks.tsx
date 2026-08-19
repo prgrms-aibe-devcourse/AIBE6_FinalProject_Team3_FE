@@ -21,9 +21,11 @@ export function SocialLoginLinks({ googleLoginUrl, kakaoLoginUrl, next }: Social
       return;
     }
     // 민감 정보가 아닌 내부 경로 문자열이라 httpOnly가 필요 없다(애초에 클라이언트에서만 쓰고 쓸
-    // 수도 있다). OAuth 왕복이 오래 걸릴 리 없으므로 5분이면 충분하고, 짧게 둬서 다음 로그인
-    // 시도에 엉뚱하게 재사용되는 걸 방지한다.
-    document.cookie = `${OAUTH_NEXT_COOKIE}=${encodeURIComponent(next)}; path=/; max-age=300; samesite=lax`;
+    // 수도 있다). 백엔드 CookieAuthorizationRequestRepository.COOKIE_EXPIRE_SECONDS(600초)와
+    // 맞춘다 - 예전엔 여기가 300초로 더 짧아서, 카카오톡 앱 전환/구글 2단계 인증 등으로 IdP 왕복이
+    // 5~10분 걸리면 백엔드 인가요청 쿠키는 아직 살아있어 로그인 자체는 성공하는데, 이 쿠키만 먼저
+    // 만료돼 원래 가려던 경로 대신 기본 경로로 튀는 불일치가 있었다.
+    document.cookie = `${OAUTH_NEXT_COOKIE}=${encodeURIComponent(next)}; path=/; max-age=600; samesite=lax`;
   }
 
   return (

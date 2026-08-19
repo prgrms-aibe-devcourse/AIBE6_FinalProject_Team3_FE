@@ -69,8 +69,8 @@ export default function Page() {
               <Link href={startHref} className="ansim-button-primary px-7 py-4 text-base">
                 내 조건으로 시작하기 <ArrowRight className="h-5 w-5" />
               </Link>
-              <Link href="/contract/upload" className="ansim-button-secondary px-7 py-4 text-base">
-                계약서 바로 분석하기
+              <Link href="/preview/market" className="ansim-button-secondary px-7 py-4 text-base">
+                회원가입 없이 예시보기
               </Link>
             </div>
           </div>
@@ -107,7 +107,8 @@ export default function Page() {
               처음 계약하는 사람에게 필요한 확인만 모았습니다
             </h2>
             <p className="text-slate-600">
-              확정 판단이 아니라, 계약 전 다시 물어봐야 할 신호를 빠르게 잡아주는 것이 목표입니다.
+              확정 판단이 아니라, 계약 전 다시 물어봐야 할 신호를 빠르게 잡아주는 것이 목표입니다. 카드를 눌러
+              실제 결과 화면 예시를 확인해보세요.
             </p>
           </div>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -118,6 +119,7 @@ export default function Page() {
                 className="p-6"
                 iconClassName={`mb-5 h-11 w-11 rounded-xl p-3 ${feature.tone}`}
                 descriptionClassName="text-sm text-slate-600"
+                href={`/preview/${feature.demoKey}`}
               />
             ))}
           </div>

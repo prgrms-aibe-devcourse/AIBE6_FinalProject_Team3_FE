@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { sanitizeNextPath } from '../lib/nextPath';
@@ -40,8 +41,12 @@ export function LoginFormClient({ next }: LoginFormClientProps) {
         if (!hasRegisteredProfile(profile)) {
           destination = '/mypage/profile';
         }
-      } catch {
+      } catch (profileError) {
         // 프로필 조회에 실패해도 로그인 자체는 성공했으므로 destination(next 또는 홈)으로 보낸다.
+        // oauth/callback/page.tsx의 동일한 실패 처리와 로깅 여부를 맞춘다 - 안 남기면 이 실패가
+        // 이메일/비밀번호 로그인 경로에서만 관측되지 않아, 프로필 조회 실패가 늘어도 로그
+        // 집계에서 원인 파악이 한쪽 경로에서만 가능해진다.
+        console.error('Login: failed to load profile', profileError);
       }
 
       router.push(destination);
@@ -79,6 +84,12 @@ export function LoginFormClient({ next }: LoginFormClientProps) {
           required
         />
       </label>
+
+      <div className="text-right">
+        <Link href="/forgot-password" className="text-sm font-bold text-teal-700 hover:text-teal-800">
+          비밀번호를 잊으셨나요?
+        </Link>
+      </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 

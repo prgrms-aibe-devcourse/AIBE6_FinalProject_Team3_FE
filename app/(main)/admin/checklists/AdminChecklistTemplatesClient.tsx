@@ -1,16 +1,20 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { resolveErrorMessage } from '../../../lib/resolveErrorMessage';
 import { propertyTypeLabelMap } from '../../../mappers/property';
+import { getAdminChecklistTemplateImages } from '../../../services/admin';
 import {
+  addAdminChecklistTemplateImage,
   createAdminChecklistItemTemplate,
   deleteAdminChecklistItemTemplate,
+  deleteAdminChecklistTemplateImage,
   updateAdminChecklistItemTemplate,
 } from '../../../services/adminActions';
 import {
   type AdminChecklistItemTemplateCreateRequestDto,
   type AdminChecklistItemTemplateDto,
+  type AdminChecklistItemTemplateImageDto,
   type ChecklistCategoryDto,
   type ChecklistImportanceDto,
   type ChecklistItemCodeDto,
@@ -23,6 +27,7 @@ import {
 // 컬럼이라 실질적인 길이 제약이 없어 여기 포함하지 않는다.
 const CONTENT_MAX_LENGTH = 200;
 const GUIDE_TEXT_MAX_LENGTH = 255;
+const OPTIONS_MAX_LENGTH = 255;
 import { Badge } from '../../../ui/Badge';
 import { Modal } from '../../../ui/Modal';
 import { Table } from '../../../ui/Table';
@@ -51,6 +56,7 @@ const ITEM_TYPE_LABEL: Record<ChecklistItemTypeDto, string> = {
   YES_NO: 'Y/N 응답',
   DATE: '날짜 입력',
   DOCUMENT_REQUEST: '서류 요청',
+  MULTIPLE_CHOICE: '선택지 응답',
 };
 
 // 백엔드 ChecklistItemCode 자바독 기준 설명 - 이 값이 있는 문항은 특정 응답값에서 자동으로
@@ -66,6 +72,24 @@ const CODE_LABEL: Record<ChecklistItemCodeDto, string> = {
   RESIDENT_REGISTRATION_REQUEST: '전입세대열람원 요청 (미제공 시 자동 주의)',
 };
 
+// 백엔드 AdminChecklistTemplateService.REQUIRED_ITEM_TYPE_BY_CODE와 동일한 6개 code 전부를
+// 그대로 미러링한다 - 여기 없는 code/itemType 조합으로 저장을 시도하면 백엔드 validateCode()가
+// ADMIN_CHECKLIST_TEMPLATE_INVALID_CODE로 무조건 거부하므로, 프론트에서 먼저 막지 않으면
+// 저장 버튼을 누른 뒤에야 서버 에러로 드러난다. 강제하는 이유는 code마다 다르다 -
+// TRUST_REGISTRATION/OWNERSHIP_MATCH/DATE_OF_CONFIRMATION_REQUEST/RESIDENT_REGISTRATION_REQUEST는
+// ChecklistItem.answer()의 자동 주의(issueFound) 판정이 그 itemType의 answer 분기에서만 동작하고,
+// OWNERSHIP_ACQUISITION_DATE/TAX_DELINQUENCY_NOTICE는 자동 판정과는 무관하지만(각각
+// risk-analysis 연계용 보조 신호, 안내 문구 전용) 백엔드가 어차피 고정된 itemType을 요구한다
+// (ChecklistItemCode 자바독 참고) - 두 경우 모두 백엔드는 예외 없이 동일하게 거부한다.
+const CODE_REQUIRED_ITEM_TYPES: Partial<Record<ChecklistItemCodeDto, ChecklistItemTypeDto[]>> = {
+  TRUST_REGISTRATION: ['YES_NO'],
+  OWNERSHIP_MATCH: ['YES_NO'],
+  OWNERSHIP_ACQUISITION_DATE: ['DATE'],
+  TAX_DELINQUENCY_NOTICE: ['CHECK'],
+  DATE_OF_CONFIRMATION_REQUEST: ['DOCUMENT_REQUEST'],
+  RESIDENT_REGISTRATION_REQUEST: ['DOCUMENT_REQUEST'],
+};
+
 type FormState = {
   category: ChecklistCategoryDto;
   content: string;
@@ -73,6 +97,9 @@ type FormState = {
   helperText: string;
   importance: ChecklistImportanceDto;
   itemType: ChecklistItemTypeDto;
+  // MULTIPLE_CHOICE일 때만 쓰는 콤마 구분 자유 텍스트("가스보일러,기름보일러,전기보일러,지역난방") -
+  // Backend도 enum이 아니라 자유 텍스트 컬럼이라 그대로 통과시킨다.
+  options: string;
   code: ChecklistItemCodeDto | typeof NONE_CODE;
   displayOrder: string;
   // 백엔드는 콤마로 구분된 문자열(예: "OFFICETEL,MULTI_FAMILY")로 받지만, 폼에서는 실제
@@ -94,6 +121,7 @@ const EMPTY_FORM: FormState = {
   helperText: '',
   importance: 'GENERAL',
   itemType: 'CHECK',
+  options: '',
   code: NONE_CODE,
   displayOrder: '1',
   applicablePropertyTypes: [],
@@ -122,6 +150,7 @@ function toFormState(template: AdminChecklistItemTemplateDto): FormState {
     helperText: template.helperText ?? '',
     importance: template.importance,
     itemType: template.itemType,
+    options: template.options ?? '',
     code: template.code ?? NONE_CODE,
     displayOrder: String(template.displayOrder),
     applicablePropertyTypes: known,
@@ -139,6 +168,8 @@ function toCreateRequest(form: FormState): AdminChecklistItemTemplateCreateReque
     helperText: form.helperText.trim() || undefined,
     importance: form.importance,
     itemType: form.itemType,
+    options:
+      form.itemType === 'MULTIPLE_CHOICE' ? form.options.trim().slice(0, OPTIONS_MAX_LENGTH) || undefined : undefined,
     code: form.code || undefined,
     displayOrder: Number(form.displayOrder),
     applicablePropertyTypes: allPropertyTypes.length > 0 ? allPropertyTypes.join(',') : undefined,
@@ -182,6 +213,15 @@ export function AdminChecklistTemplatesClient({ data, loadError, onMutated }: Ad
       setFormError('노출 순서는 1 이상의 숫자여야 합니다.');
       return;
     }
+    if (form.code) {
+      const requiredItemTypes = CODE_REQUIRED_ITEM_TYPES[form.code];
+      if (requiredItemTypes && !requiredItemTypes.includes(form.itemType)) {
+        setFormError(
+          `"${CODE_LABEL[form.code]}" 코드는 응답 방식이 ${requiredItemTypes.map((type) => ITEM_TYPE_LABEL[type]).join('/')}일 때만 사용할 수 있습니다. 응답 방식을 바꾸거나 코드를 "없음"으로 선택해주세요.`,
+        );
+        return;
+      }
+    }
 
     setSubmitting(true);
     setFormError(undefined);
@@ -215,6 +255,71 @@ export function AdminChecklistTemplatesClient({ data, loadError, onMutated }: Ad
     }
   }
 
+  // 이미지는 문항 생성 직후(templateId 없음)엔 관리할 수 없어 수정 모달에서만 다룬다.
+  const editingTemplateId = modal?.type === 'edit' ? modal.template.id : null;
+  const [images, setImages] = useState<AdminChecklistItemTemplateImageDto[]>([]);
+  const [imagesLoading, setImagesLoading] = useState(false);
+  const [imagesError, setImagesError] = useState<string | undefined>();
+  const [newImageUrl, setNewImageUrl] = useState('');
+  const [imageActionPending, setImageActionPending] = useState(false);
+
+  useEffect(() => {
+    if (editingTemplateId === null) {
+      // 모달이 닫히거나 생성/삭제 모달로 바뀌어 editingTemplateId가 null이 될 때만 의미 있는
+      // 재설정이다(최초 렌더 시 초기값과 동일) - 다른 문항의 수정 모달을 다시 열었을 때 이전
+      // 문항의 이미지 목록/입력값이 잠깐이라도 보이지 않도록 의도적으로 동기 호출한다.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setImages([]);
+      setImagesError(undefined);
+      setNewImageUrl('');
+      return;
+    }
+    let cancelled = false;
+    setImagesLoading(true);
+    getAdminChecklistTemplateImages(editingTemplateId)
+      .then((result) => {
+        if (!cancelled) setImages(result);
+      })
+      .catch((error) => {
+        if (!cancelled) setImagesError(resolveErrorMessage(error, '예시 이미지를 불러오지 못했습니다.'));
+      })
+      .finally(() => {
+        if (!cancelled) setImagesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [editingTemplateId]);
+
+  async function handleAddImage() {
+    if (editingTemplateId === null || !newImageUrl.trim()) return;
+    setImageActionPending(true);
+    setImagesError(undefined);
+    try {
+      const created = await addAdminChecklistTemplateImage(editingTemplateId, { imageUrl: newImageUrl.trim() });
+      setImages((current) => [...current, created]);
+      setNewImageUrl('');
+    } catch (error) {
+      setImagesError(resolveErrorMessage(error, '이미지 추가에 실패했습니다.'));
+    } finally {
+      setImageActionPending(false);
+    }
+  }
+
+  async function handleDeleteImage(imageId: number) {
+    if (editingTemplateId === null) return;
+    setImageActionPending(true);
+    setImagesError(undefined);
+    try {
+      await deleteAdminChecklistTemplateImage(editingTemplateId, imageId);
+      setImages((current) => current.filter((image) => image.id !== imageId));
+    } catch (error) {
+      setImagesError(resolveErrorMessage(error, '이미지 삭제에 실패했습니다.'));
+    } finally {
+      setImageActionPending(false);
+    }
+  }
+
   return (
     <div>
       <div className="mb-6 flex items-center justify-between">
@@ -228,10 +333,13 @@ export function AdminChecklistTemplatesClient({ data, loadError, onMutated }: Ad
       </div>
 
       <p className="mb-4 text-sm text-slate-500">
-        여기서 수정·삭제해도 이미 만들어진 유저 체크리스트에는 영향이 없어요. 다음에 새로 생성되는 체크리스트부터 반영됩니다.
+        여기서 수정·삭제해도 이미 만들어진 유저 체크리스트에는 영향이 없어요. 다음에 새로 생성되는 체크리스트부터
+        반영됩니다.
       </p>
 
-      {loadError && <div className="ansim-card mb-4 border-red-100 bg-red-50 p-6 text-sm text-red-700">{loadError}</div>}
+      {loadError && (
+        <div className="ansim-card mb-4 border-red-100 bg-red-50 p-6 text-sm text-red-700">{loadError}</div>
+      )}
 
       {data && (
         <Table
@@ -242,7 +350,9 @@ export function AdminChecklistTemplatesClient({ data, loadError, onMutated }: Ad
               key: 'importance',
               header: '중요도',
               render: (row) => (
-                <Badge className={row.importance === 'REQUIRED' ? 'bg-teal-50 text-teal-700' : 'bg-slate-100 text-slate-600'}>
+                <Badge
+                  className={row.importance === 'REQUIRED' ? 'bg-teal-50 text-teal-700' : 'bg-slate-100 text-slate-600'}
+                >
                   {IMPORTANCE_LABEL[row.importance]}
                 </Badge>
               ),
@@ -407,6 +517,19 @@ export function AdminChecklistTemplatesClient({ data, loadError, onMutated }: Ad
                 </label>
               </div>
 
+              {modal.form.itemType === 'MULTIPLE_CHOICE' && (
+                <label className="block text-xs font-bold text-slate-600">
+                  선택지 (콤마로 구분, 예: 가스보일러,기름보일러,전기보일러,지역난방)
+                  <input
+                    type="text"
+                    value={modal.form.options}
+                    onChange={(event) => updateForm({ options: event.target.value })}
+                    maxLength={OPTIONS_MAX_LENGTH}
+                    className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
+                  />
+                </label>
+              )}
+
               <label className="block text-xs font-bold text-slate-600">
                 자동 판정 코드 (선택 - 특수 문항이 아니면 비워두세요)
                 <select
@@ -463,6 +586,61 @@ export function AdminChecklistTemplatesClient({ data, loadError, onMutated }: Ad
                   />
                   새 체크리스트 생성 시 이 문항 노출
                 </label>
+              )}
+
+              {modal.type === 'edit' && (
+                <div className="border-t border-slate-200 pt-3">
+                  <p className="mb-2 text-xs font-bold text-slate-600">
+                    예시 이미지 (선택 - 이미 S3 등에 업로드된 이미지의 URL만 등록, 파일 업로드는 지원 안 함)
+                  </p>
+                  {imagesLoading && <p className="text-xs text-slate-400">불러오는 중...</p>}
+                  {!imagesLoading && images.length === 0 && (
+                    <p className="text-xs text-slate-400">등록된 예시 이미지가 없습니다.</p>
+                  )}
+                  {images.length > 0 && (
+                    <ul className="mb-2 space-y-2">
+                      {images.map((image) => (
+                        <li key={image.id} className="flex items-center gap-2">
+                          {/* eslint-disable-next-line @next/next/no-img-element -- 관리자가 임의 URL을
+                          입력해 next.config.js 허용 호스트 목록에 없을 수 있어 next/image로 최적화 불가 */}
+                          <img
+                            src={image.imageUrl}
+                            alt=""
+                            className="h-10 w-10 shrink-0 rounded-lg border border-slate-200 object-cover"
+                          />
+                          <span className="flex-1 truncate text-xs text-slate-500">{image.imageUrl}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteImage(image.id)}
+                            disabled={imageActionPending}
+                            className="shrink-0 rounded-lg border border-red-200 px-2 py-1 text-xs font-bold text-red-600 hover:bg-red-50 disabled:opacity-50"
+                          >
+                            삭제
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newImageUrl}
+                      onChange={(event) => setNewImageUrl(event.target.value)}
+                      placeholder="이미지 URL 붙여넣기"
+                      disabled={imageActionPending}
+                      className="flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddImage}
+                      disabled={imageActionPending || !newImageUrl.trim()}
+                      className="shrink-0 rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      추가
+                    </button>
+                  </div>
+                  {imagesError && <p className="mt-1.5 text-xs text-red-600">{imagesError}</p>}
+                </div>
               )}
             </div>
 

@@ -2,7 +2,7 @@
 
 import { Loader2 } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useEffect } from 'react';
+import { Suspense, useEffect, useRef } from 'react';
 import { isUnreachableError } from '../../lib/api/http';
 import { sanitizeNextPath } from '../../lib/nextPath';
 import { hasRegisteredProfile } from '../../lib/profile';
@@ -33,13 +33,30 @@ function consumeOAuthNextCookie(): string | null {
 function OAuthCallbackContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  // consumeOAuthNextCookie()는 읽으면서 쿠키를 지우는 1회용 소비다 - React 18 StrictMode(dev
+  // 전용)가 effect를 마운트→클린업→재마운트로 두 번 실행하면, 첫 번째(시뮬레이션) 패스가 쿠키를
+  // 이미 소비해버려 실제 진행되는 두 번째 패스는 next 없이 시작한 것처럼 보인다(프로덕션은
+  // StrictMode 이중 실행이 없어 영향 없음). ref는 컴포넌트 인스턴스에 묶여 두 패스 사이에도
+  // 유지되므로, 최초 1회만 실제로 쿠키를 읽고 이후 재실행에서는 캐시된 값을 재사용한다.
+  const rawNextRef = useRef<{ read: boolean; value: string | null }>({ read: false, value: null });
 
   useEffect(() => {
+    let cancelled = false;
+    // MainLayoutGate/admin-layout과 동일한 이유로 라우트 이동 시 진행 중인 요청을 실제로
+    // 중단시킨다 - 그렇지 않으면 이 세션 확인이 아직 응답 전인 사이에 사용자가 다른 페이지로
+    // 이동해도, 나중에 도착한 401/refresh-rejected 응답이 requestJson 내부에서 그 시점의
+    // window.location(=이미 이동한 새 페이지)을 세션 만료로 강제 리다이렉트시킬 수 있다. 이
+    // 콜백 페이지는 방금 OAuth를 마치고 돌아온 첫 진입점이라 이 가드가 특히 빠지기 쉬웠다.
+    const controller = new AbortController();
+
     // 로그인 화면(SocialLoginLinks)이 구글/카카오로 넘어가기 직전에 남겨둔 원래 경로 — OAuth는
     // 제공자로 리다이렉트됐다 돌아오는 왕복이라 쿼리스트링으로 next를 들고 다닐 방법이 없어서 대신
     // 쿠키를 쓴다. 실패/성공 어느 분기로 끝나든 한 번 쓰고 나면 지워서 다음 로그인 시도에 잘못
     // 재사용되지 않게 한다.
-    const rawNext = consumeOAuthNextCookie();
+    if (!rawNextRef.current.read) {
+      rawNextRef.current = { read: true, value: consumeOAuthNextCookie() };
+    }
+    const rawNext = rawNextRef.current.value;
     const next = sanitizeNextPath(rawNext);
 
     const error = searchParams.get('error');
@@ -47,11 +64,11 @@ function OAuthCallbackContent() {
       const loginUrl = new URL('/login', window.location.origin);
       loginUrl.searchParams.set('error', error);
       // 실패해도 next는 살려서 로그인 화면(이메일 로그인/다른 소셜 로그인)이 여전히 원래 경로로
-      // 복귀할 수 있게 한다 — rawNext가 있을 때만 붙여서, 애초에 next 없이 시작한 로그인 실패에는
-      // 쓸데없이 /home을 next로 얹지 않는다.
-      if (rawNext) {
-        loginUrl.searchParams.set('next', next);
-      }
+      // 복귀할 수 있게 한다 - rawNext가 없었어도(next 없이 시작한 로그인) next는 이미
+      // sanitizeNextPath로 '/home'이 채워져 있으므로 항상 붙인다. 예전엔 rawNext가 있을 때만
+      // 붙여서, session_unavailable 재시도 UI가 next 존재를 전제로 하던 login/page.tsx와 맞물려
+      // "처음부터 로그인"한 사용자는 일시적 오류에도 재시도 버튼 자체를 못 보는 문제가 있었다.
+      loginUrl.searchParams.set('next', next);
       router.replace(`${loginUrl.pathname}${loginUrl.search}`);
       return;
     }
@@ -62,8 +79,9 @@ function OAuthCallbackContent() {
       // 백엔드(EC2)가 소셜 로그인 성공 시 발급한 access/refresh 쿠키는 EC2 도메인에만 종속되므로,
       // 이 페이지(Vercel) 서버가 아니라 브라우저가 직접 credentials:'include'로 확인해야 한다.
       try {
-        await getCurrentUser();
+        await getCurrentUser(undefined, controller.signal);
       } catch (error) {
+        if (cancelled) return;
         // MainLayoutGate/admin-layout과 동일한 이유로 콘솔에 원인을 남긴다 - 이 콜백은 방금
         // OAuth를 마치고 돌아온 첫 진입점이라, CORS/쿠키 설정이 미묘하게 틀렸을 때 원인 진단이
         // 가장 필요한 지점인데 정작 아무 로그도 없이 "다시 로그인하세요"만 보이면 안 된다.
@@ -74,26 +92,28 @@ function OAuthCallbackContent() {
         const errorParam = isUnreachableError(error) ? 'session_unavailable' : 'session_expired';
         const loginUrl = new URL('/login', window.location.origin);
         loginUrl.searchParams.set('error', errorParam);
-        // 위 error 분기와 동일한 이유로 next를 살려둔다 — rawNext가 있을 때만 붙여서, 애초에
-        // next 없이 시작한 로그인 시도에 쓸데없이 /home을 next로 얹지 않는다.
-        if (rawNext) {
-          loginUrl.searchParams.set('next', next);
-        }
+        // 위 error 분기와 동일한 이유로 next를 항상 붙인다(rawNext가 없었어도 이미 '/home'으로
+        // 채워져 있다).
+        loginUrl.searchParams.set('next', next);
         router.replace(`${loginUrl.pathname}${loginUrl.search}`);
         return;
       }
+      if (cancelled) return;
 
       try {
         const profile = await getMyProfile();
+        if (cancelled) return;
         if (!hasRegisteredProfile(profile)) {
           router.replace('/mypage/profile');
           return;
         }
       } catch (error) {
+        if (cancelled) return;
         // 프로필 조회에 실패해도 로그인 자체는 성공했으므로 destination(next 또는 홈)으로
         // 보낸다 - 다만 원인 진단을 위해 콘솔에는 남긴다.
         console.error('OAuth callback: failed to load profile', error);
       }
+      if (cancelled) return;
 
       // notice=account_linked: 새 계정이 아니라 이미 있던 계정(로컬 가입 또는 다른 소셜)에 방금
       // 연동된 로그인이라는 신호 — 홈 화면이 이 값을 보고 안내 배너를 한 번 띄운다. 백엔드가 보낸
@@ -107,6 +127,11 @@ function OAuthCallbackContent() {
     }
 
     finish();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

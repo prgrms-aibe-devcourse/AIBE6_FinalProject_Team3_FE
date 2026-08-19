@@ -96,20 +96,23 @@ export async function updateChecklistItem(
 
 export type GetChecklistOverviewsParams = {
   page?: number;
+  size?: number;
 };
 
-// size/sort는 안 보낸다 - Backend 기본 페이지 크기(20)를 그대로 쓰고, 정렬은 항상 최종 점검일
-// 최신순으로 고정되어 있어(Backend PageableDefault) 보내도 무시된다.
+// sort는 안 보낸다 - 정렬은 항상 최종 점검일 최신순으로 고정되어 있어(Backend PageableDefault)
+// 보내도 무시된다. size는 properties.ts의 getProperties와 동일하게 화면(PAGE_SIZE)이 정한 값을
+// 그대로 실어 보낸다 - 안 보내면 Backend 기본값(20)이 적용된다.
 export async function getMyChecklistOverviews(
   params?: GetChecklistOverviewsParams,
   cookieHeader?: string,
 ): Promise<ChecklistOverviewPage> {
   if (useMockData) {
-    return getMockChecklistOverviews(params?.page);
+    return getMockChecklistOverviews(params?.page, params?.size);
   }
 
   const query = new URLSearchParams();
   if (params?.page !== undefined) query.set('page', String(params.page));
+  if (params?.size !== undefined) query.set('size', String(params.size));
   const queryString = query.toString();
 
   const page = await requestJson<PageResponseDto<ChecklistOverviewDto>>(

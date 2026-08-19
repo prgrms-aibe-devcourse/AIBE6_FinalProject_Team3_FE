@@ -20,12 +20,19 @@ export function PriorityActionCard({ action }: PriorityActionCardProps) {
             <p className="text-sm leading-relaxed text-slate-600">{action.description}</p>
           </div>
         </div>
-        <Link
-          href={action.ctaHref}
-          className="ansim-button-primary w-fit shrink-0 px-5 py-3 md:self-center"
-        >
-          {action.ctaLabel}
-        </Link>
+        {action.onCtaClick ? (
+          <button
+            type="button"
+            onClick={action.onCtaClick}
+            className="ansim-button-primary w-fit shrink-0 px-5 py-3 md:self-center"
+          >
+            {action.ctaLabel}
+          </button>
+        ) : (
+          <Link href={action.ctaHref} className="ansim-button-primary w-fit shrink-0 px-5 py-3 md:self-center">
+            {action.ctaLabel}
+          </Link>
+        )}
       </div>
     </div>
   );

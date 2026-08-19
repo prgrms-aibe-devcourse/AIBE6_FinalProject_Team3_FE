@@ -13,14 +13,23 @@ const ERROR_MESSAGES: Record<string, string> = {
   // 세션이 실제로 만료된 게 아니라 서버/네트워크가 일시적으로 불안정했을 뿐인 경우
   // (proxy.ts/session-recover의 refresh 'unreachable') — "다시 로그인하세요"와 구분한다.
   session_unavailable: '일시적으로 서버와 통신할 수 없습니다. 잠시 후 다시 시도해주세요.',
-  // 백엔드 OAuth2AuthenticationFailureHandler가 이제 CustomOAuth2UserService가 만드는 구체적인
-  // 코드를 그대로 전달한다(예전엔 항상 oauth_login_failed로 뭉뚱그려졌음) - 이 세 코드에 맞는
-  // 안내를 추가해야 그 구체성이 실제로 화면까지 전달된다. 백엔드 화이트리스트(OAuth2AuthenticationFailureHandler의
-  // DOMAIN_SPECIFIC_ERROR_CODES)에 코드를 추가할 때는 항상 여기도 같이 갱신해야 한다 - 안 그러면
-  // 화이트리스트는 통과하는데 이 테이블엔 없어 기본 문구로 떨어진다.
-  account_blocked: '정지되었거나 이용할 수 없는 계정입니다. 고객센터에 문의해주세요.',
+  // 백엔드 OAuth2AuthenticationFailureHandler는 CustomOAuth2UserService가 만드는 코드를 그대로
+  // 전달한다(화이트리스트로 걸러내지 않고 항상 pass-through) - 새 코드를 추가할 때는 항상 여기도
+  // 같이 갱신해야 한다, 안 그러면 기본 문구로 떨어진다.
+  //
+  // (2026-08-12) account_blocked는 더 이상 백엔드가 보내지 않는다 - 탈퇴/정지 계정임을 노출하지
+  // 않고 다른 실패와 동일하게 oauth_login_failed로 통일했다(계정 존재 여부 비노출 원칙을 로컬
+  // 로그인/토큰 검증과 맞춤, backend/docs/specs/auth-design.md 참고). 혹시 과거 배포본이 이
+  // 코드를 여전히 보내는 경우를 대비해 매핑 자체는 남겨둔다.
+  account_blocked: '로그인에 실패했습니다. 잠시 후 다시 시도해주세요.',
   email_conflict: '이미 사용 중인 이메일입니다. 이메일/비밀번호 로그인 등 다른 방법을 이용해주세요.',
   social_account_conflict: '이 계정에는 이미 다른 소셜 계정이 연동되어 있습니다. 고객센터에 문의해주세요.',
+  // OAuth 제공자가 닉네임을 안 줘서 백엔드가 만든 대체 닉네임이 다른 유저의 닉네임과 우연히
+  // 겹친 극히 드문 경우 - 같은 provider/providerId로는 항상 같은 fallback 닉네임이 만들어지므로
+  // 재시도해도 매번 같은 이유로 실패한다("잠시 후 다시 시도"는 부정확한 안내였다, 2026-08-14
+  // 리뷰에서 지적됨). 닉네임 자체를 프론트에서 바꿔줄 방법이 없으므로, 재시도 유도 대신
+  // 닉네임을 직접 고를 수 있는 다른 가입 방법(이메일/비밀번호)을 안내한다.
+  oauth_nickname_conflict: '자동 생성된 닉네임이 이미 사용 중이라 가입할 수 없습니다. 이메일/비밀번호로 가입하거나 고객센터에 문의해주세요.',
   // OAuth2AuthenticationSuccessHandler가 소셜 인증 자체는 성공했지만 그 이후 토큰 발급(Redis 장애 등)에
   // 실패했을 때 보내는 코드 - 이 코드가 없으면 사용자는 일반 문구만 보고 원인을 알 수 없다.
   token_issue_failed: '일시적으로 로그인 처리를 완료하지 못했습니다. 잠시 후 다시 시도해주세요.',
@@ -43,7 +52,13 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   // 재시도하면 항상 refreshToken이 비어 있는 것으로 처리돼 세션이 멀쩡해도 무조건 재로그인을
   // 강제한다(SessionRecoverRetryButton.tsx 참고) - 그 배포에서는 대신 브라우저가 직접
   // 크로스오리진으로 백엔드에 재확인하는 클라이언트 버튼을 쓴다.
-  const showRetry = error === 'session_unavailable' && Boolean(next);
+  //
+  // next 존재 여부와 무관하게 보여준다 - 보호된 페이지에서 튕겨온 게 아니라 처음부터 소셜
+  // 로그인을 시도했다가(next 없음) OAuth 완료 직후 세션 확인이 일시 실패한 경우에도, next가
+  // 없다는 이유만으로 재시도 버튼 자체가 사라지면 사용자는 일시적 오류인데도 로그인을 처음부터
+  // 다시 해야 했다. 없으면 sanitizeNextPath와 동일한 기본 경로(/home)로 대체한다.
+  const showRetry = error === 'session_unavailable';
+  const retryNext = next ?? '/home';
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
@@ -59,13 +74,16 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         {errorMessage && (
           <NoticeBox icon={AlertCircle} iconClassName="text-red-500" className="mb-6 bg-red-50 text-red-600">
             {errorMessage}
-            {showRetry && next && (
+            {showRetry && (
               <>
                 {' '}
                 {crossOriginAuth ? (
-                  <SessionRecoverRetryButton next={next} />
+                  <SessionRecoverRetryButton next={retryNext} />
                 ) : (
-                  <Link href={`/auth/session-recover?next=${encodeURIComponent(next)}`} className="font-bold underline">
+                  <Link
+                    href={`/auth/session-recover?next=${encodeURIComponent(retryNext)}`}
+                    className="font-bold underline"
+                  >
                     다시 시도
                   </Link>
                 )}
@@ -92,7 +110,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         </p>
 
         <Link href="/" className="mt-6 block text-center text-xs text-slate-400 hover:text-slate-600">
-          랜딩 페이지로 돌아가기
+          홈페이지로 돌아가기
         </Link>
       </div>
     </div>

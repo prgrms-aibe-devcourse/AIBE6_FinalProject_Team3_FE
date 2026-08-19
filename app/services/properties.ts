@@ -110,6 +110,8 @@ export async function createProperty(request: CreatePropertyRequestDto): Promise
         sampleCount: null,
         referenceDate: null,
         radiusMeters: null,
+        areaErrorRate: null,
+        lookbackMonths: null,
         message: '모의 데이터 모드라 시세 비교를 제공하지 않아요.',
       },
       notice: null,

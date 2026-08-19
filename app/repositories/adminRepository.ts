@@ -1,6 +1,9 @@
 import {
+  type AdminBulkActionResponseDto,
   type AdminChecklistItemTemplateCreateRequestDto,
   type AdminChecklistItemTemplateDto,
+  type AdminChecklistItemTemplateImageCreateRequestDto,
+  type AdminChecklistItemTemplateImageDto,
   type AdminChecklistItemTemplateUpdateRequestDto,
   type AdminDashboardStatsDto,
   type AdminPropertyReportDetailDto,
@@ -37,6 +40,9 @@ type AdminMockState = {
   reports: AdminPropertyReportListItemDto[];
   reportDetails: Record<number, AdminPropertyReportDetailDto>;
   checklistTemplates: AdminChecklistItemTemplateDto[];
+  // 문항 템플릿 id -> 예시 이미지 목록. Backend와 동일하게 이미지는 템플릿 본체(AdminChecklistItemTemplateDto)에
+  // 안 담기고 별도 조회/추가/삭제 엔드포인트로 관리된다.
+  checklistTemplateImages: Record<number, AdminChecklistItemTemplateImageDto[]>;
 };
 
 const globalForAdminMock = globalThis as typeof globalThis & { __adminMockState?: AdminMockState };
@@ -48,12 +54,14 @@ const mockState: AdminMockState = (globalForAdminMock.__adminMockState ??= {
     Object.entries(initAdminPropertyReportDetails).map(([id, detail]) => [id, { ...detail }]),
   ),
   checklistTemplates: initAdminChecklistItemTemplates.map((template) => ({ ...template })),
+  checklistTemplateImages: {},
 });
 
 const mockUsers = mockState.users;
 const mockReports = mockState.reports;
 const mockReportDetails = mockState.reportDetails;
 const mockChecklistTemplates = mockState.checklistTemplates;
+const mockChecklistTemplateImages = mockState.checklistTemplateImages;
 // 매물 등록 이력은 admin 화면에서 수정할 일이 없어 복제하지 않고 init 데이터를 그대로 참조한다.
 const mockPropertyRegistrations = initAdminPropertyRegistrations;
 
@@ -96,6 +104,27 @@ export function updateMockAdminUserStatus(userId: number, status: AdminUserStatu
   return toUserDetail(user);
 }
 
+// 실제 backend(AdminUserService.bulkUpdateStatus)와 달리 자기 자신/마지막 관리자 가드는 재현하지
+// 않는다 - 이 mock 계층의 다른 단건 함수들도 그 가드 없이 상태만 그대로 반영하는 것과 일관된다.
+// "존재하지 않는 id"만 실패로 담아, UI가 실제로 부분 실패 결과를 어떻게 그리는지는 검증할 수 있게 한다.
+export function bulkUpdateMockAdminUserStatus(
+  userIds: number[],
+  status: 'ACTIVE' | 'SUSPENDED',
+): AdminBulkActionResponseDto {
+  const succeededIds: number[] = [];
+  const failures: AdminBulkActionResponseDto['failures'] = [];
+  for (const userId of userIds) {
+    const user = mockUsers.find((candidate) => candidate.id === userId);
+    if (!user) {
+      failures.push({ id: userId, message: '존재하지 않는 사용자입니다.' });
+      continue;
+    }
+    user.status = status;
+    succeededIds.push(userId);
+  }
+  return { succeededIds, failures };
+}
+
 export function getMockAdminPropertyReports(
   params: AdminPropertyReportSearchParams = {},
 ): PageResponseDto<AdminPropertyReportListItemDto> {
@@ -120,11 +149,37 @@ export function reviewMockAdminPropertyReport(
   if (!detail || !listItem) return undefined;
 
   detail.status = request.status;
-  detail.reviewerId = 1;
   detail.reviewedAt = new Date().toISOString().slice(0, 10);
   detail.reviewMemo = request.memo ?? null;
   listItem.status = request.status;
   return detail;
+}
+
+// 실제 backend(AdminPropertyReportService.bulkReview)와 달리 본인 신고 셀프검토 금지 가드는
+// 재현하지 않는다 - reviewMockAdminPropertyReport와 동일하게 "존재하지 않는 id"만 실패로 담는다.
+export function bulkReviewMockAdminPropertyReports(
+  reportIds: number[],
+  request: AdminPropertyReportReviewRequestDto,
+): AdminBulkActionResponseDto {
+  const succeededIds: number[] = [];
+  const failures: AdminBulkActionResponseDto['failures'] = [];
+  for (const reportId of reportIds) {
+    const detail = mockReportDetails[reportId];
+    const listItem = mockReports.find((report) => report.id === reportId);
+    if (!detail || !listItem) {
+      failures.push({
+        id: reportId,
+        message: '존재하지 않는 신고입니다.',
+      });
+      continue;
+    }
+    detail.status = request.status;
+    detail.reviewedAt = new Date().toISOString().slice(0, 10);
+    detail.reviewMemo = request.memo ?? null;
+    listItem.status = request.status;
+    succeededIds.push(reportId);
+  }
+  return { succeededIds, failures };
 }
 
 export type MockAdminDashboardParams = {
@@ -133,7 +188,13 @@ export type MockAdminDashboardParams = {
 };
 
 const DEFAULT_TREND_DAYS = 14;
-const REASONS: PropertyReportReasonDto[] = ['ALREADY_CONTRACTED', 'PRICE_MISMATCH', 'INFO_MISMATCH', 'DUPLICATE', 'ETC'];
+const REASONS: PropertyReportReasonDto[] = [
+  'ALREADY_CONTRACTED',
+  'PRICE_MISMATCH',
+  'INFO_MISMATCH',
+  'DUPLICATE',
+  'ETC',
+];
 
 function toIsoDate(date: Date): string {
   return date.toISOString().slice(0, 10);
@@ -176,8 +237,14 @@ export function getMockAdminDashboardStats(params: MockAdminDashboardParams = {}
   const reportsInRange = mockReports.filter((report) => inRange(report.createdAt, startDate, endDate));
 
   const dates = eachDate(startDate, endDate);
-  const signups = countByDate(dates, usersInRange.map((user) => user.createdAt));
-  const propertyRegistrations = countByDate(dates, registrationsInRange.map((r) => r.createdAt));
+  const signups = countByDate(
+    dates,
+    usersInRange.map((user) => user.createdAt),
+  );
+  const propertyRegistrations = countByDate(
+    dates,
+    registrationsInRange.map((r) => r.createdAt),
+  );
 
   const registeredUserIds = new Set(mockPropertyRegistrations.map((r) => r.userId));
   const joinedUserIds = usersInRange.map((user) => user.id);
@@ -195,9 +262,9 @@ export function getMockAdminDashboardStats(params: MockAdminDashboardParams = {}
 
   return {
     summary: {
-      totalUsers: usersInRange.length,
-      totalProperties: registrationsInRange.length,
-      pendingReports: reportsInRange.filter((report) => report.status === 'RECEIVED').length,
+      newUsers: usersInRange.length,
+      newProperties: registrationsInRange.length,
+      newPendingReports: reportsInRange.filter((report) => report.status === 'RECEIVED').length,
     },
     trends: { signups, propertyRegistrations },
     distributions: { byPropertyRegistration, byReportReason },
@@ -228,6 +295,7 @@ export function createMockAdminChecklistItemTemplate(
     helperText: request.helperText ?? null,
     importance: request.importance,
     itemType: request.itemType,
+    options: request.options ?? null,
     displayOrder: request.displayOrder,
     active: true,
     applicablePropertyTypes: request.applicablePropertyTypes ?? null,
@@ -249,6 +317,7 @@ export function updateMockAdminChecklistItemTemplate(
   template.helperText = request.helperText ?? null;
   template.importance = request.importance;
   template.itemType = request.itemType;
+  template.options = request.options ?? null;
   template.code = request.code ?? null;
   template.displayOrder = request.displayOrder;
   template.applicablePropertyTypes = request.applicablePropertyTypes ?? null;
@@ -260,5 +329,40 @@ export function deleteMockAdminChecklistItemTemplate(templateId: number): boolea
   const index = mockChecklistTemplates.findIndex((candidate) => candidate.id === templateId);
   if (index === -1) return false;
   mockChecklistTemplates.splice(index, 1);
+  return true;
+}
+
+export function getMockAdminChecklistTemplateImages(templateId: number): AdminChecklistItemTemplateImageDto[] {
+  return [...(mockChecklistTemplateImages[templateId] ?? [])].sort((a, b) => a.displayOrder - b.displayOrder);
+}
+
+function nextMockImageId(): number {
+  const allImages = Object.values(mockChecklistTemplateImages).flat();
+  return allImages.reduce((max, image) => Math.max(max, image.id), 0) + 1;
+}
+
+// 실제 백엔드(AdminChecklistTemplateService.addImage)와 동일하게, 새 이미지는 항상 해당 문항의
+// 기존 이미지 중 가장 큰 표시순서 다음 값으로 자동 배정되어 맨 뒤에 추가된다.
+export function addMockAdminChecklistTemplateImage(
+  templateId: number,
+  request: AdminChecklistItemTemplateImageCreateRequestDto,
+): AdminChecklistItemTemplateImageDto {
+  const existing = mockChecklistTemplateImages[templateId] ?? [];
+  const displayOrder = existing.reduce((max, image) => Math.max(max, image.displayOrder), 0) + 1;
+  const created: AdminChecklistItemTemplateImageDto = {
+    id: nextMockImageId(),
+    imageUrl: request.imageUrl,
+    displayOrder,
+  };
+  mockChecklistTemplateImages[templateId] = [...existing, created];
+  return created;
+}
+
+export function deleteMockAdminChecklistTemplateImage(templateId: number, imageId: number): boolean {
+  const existing = mockChecklistTemplateImages[templateId];
+  if (!existing) return false;
+  const next = existing.filter((image) => image.id !== imageId);
+  if (next.length === existing.length) return false;
+  mockChecklistTemplateImages[templateId] = next;
   return true;
 }

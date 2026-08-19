@@ -2,12 +2,14 @@ import { useMockData } from '../config/dataSource';
 import { requestJson } from '../lib/api/http';
 import {
   getMockAdminChecklistItemTemplates,
+  getMockAdminChecklistTemplateImages,
   getMockAdminDashboardStats,
   getMockAdminPropertyReports,
   getMockAdminUsers,
 } from '../repositories/adminRepository';
 import {
   type AdminChecklistItemTemplateDto,
+  type AdminChecklistItemTemplateImageDto,
   type AdminDashboardStatsDto,
   type AdminPropertyReportListItemDto,
   type AdminUserListItemDto,
@@ -41,16 +43,12 @@ function toQueryString(params: Record<string, string | number | undefined>): str
 
 export async function getAdminUsers(
   params: AdminUserSearchParams = {},
-  cookieHeader?: string,
 ): Promise<PageResponseDto<AdminUserListItemDto>> {
   if (useMockData) {
     return getMockAdminUsers(params);
   }
   const path = `/admin/users${toQueryString(params)}`;
-  return requestJson<PageResponseDto<AdminUserListItemDto>>(
-    path,
-    cookieHeader ? { headers: { Cookie: cookieHeader } } : undefined,
-  );
+  return requestJson<PageResponseDto<AdminUserListItemDto>>(path);
 }
 
 export type AdminPropertyReportSearchParams = {
@@ -61,16 +59,12 @@ export type AdminPropertyReportSearchParams = {
 
 export async function getAdminPropertyReports(
   params: AdminPropertyReportSearchParams = {},
-  cookieHeader?: string,
 ): Promise<PageResponseDto<AdminPropertyReportListItemDto>> {
   if (useMockData) {
     return getMockAdminPropertyReports(params);
   }
   const path = `/admin/property-reports${toQueryString(params)}`;
-  return requestJson<PageResponseDto<AdminPropertyReportListItemDto>>(
-    path,
-    cookieHeader ? { headers: { Cookie: cookieHeader } } : undefined,
-  );
+  return requestJson<PageResponseDto<AdminPropertyReportListItemDto>>(path);
 }
 
 export type AdminDashboardStatsParams = {
@@ -78,23 +72,26 @@ export type AdminDashboardStatsParams = {
   endDate?: string;
 };
 
-export async function getAdminDashboardStats(
-  params: AdminDashboardStatsParams = {},
-  cookieHeader?: string,
-): Promise<AdminDashboardStatsDto> {
+export async function getAdminDashboardStats(params: AdminDashboardStatsParams = {}): Promise<AdminDashboardStatsDto> {
   if (useMockData) {
     return getMockAdminDashboardStats(params);
   }
   const path = `/admin/stats/dashboard${toQueryString(params)}`;
-  return requestJson<AdminDashboardStatsDto>(path, cookieHeader ? { headers: { Cookie: cookieHeader } } : undefined);
+  return requestJson<AdminDashboardStatsDto>(path);
 }
 
-export async function getAdminChecklistItemTemplates(cookieHeader?: string): Promise<AdminChecklistItemTemplateDto[]> {
+export async function getAdminChecklistItemTemplates(): Promise<AdminChecklistItemTemplateDto[]> {
   if (useMockData) {
     return getMockAdminChecklistItemTemplates();
   }
-  return requestJson<AdminChecklistItemTemplateDto[]>(
-    '/admin/checklist-templates',
-    cookieHeader ? { headers: { Cookie: cookieHeader } } : undefined,
-  );
+  return requestJson<AdminChecklistItemTemplateDto[]>('/admin/checklist-templates');
+}
+
+export async function getAdminChecklistTemplateImages(
+  templateId: number,
+): Promise<AdminChecklistItemTemplateImageDto[]> {
+  if (useMockData) {
+    return getMockAdminChecklistTemplateImages(templateId);
+  }
+  return requestJson<AdminChecklistItemTemplateImageDto[]>(`/admin/checklist-templates/${templateId}/images`);
 }

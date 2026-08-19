@@ -18,9 +18,13 @@ export type MarketComparisonDto = {
   sampleCount: number | null;
   referenceDate: string | null;
   radiusMeters: number | null;   // 실제 적용된 반경 단계(300/600). UNAVAILABLE이면 null
+  areaErrorRate: number | null;  // 표본 필터링에 쓰인 면적오차 허용율(0.2 = ±20%). UNAVAILABLE이면 null
+  lookbackMonths: number | null; // 실거래를 조회한 개월 수. UNAVAILABLE이면 null
   message: string | null;        // UNAVAILABLE 사유를 사람이 읽을 문장으로. AVAILABLE이면 null
 };
 ```
+
+**(#154 완료)** `areaErrorRate`/`lookbackMonths`는 BE #206에서 판정 근거 데이터로 추가된 필드다 — "왜 이 표본으로 비교됐는지" 계산 기준값을 보여달라는 멘토 피드백 반영. `PropertyDetailClient.tsx`의 시세 비교(AVAILABLE) 카드에 "면적오차 ±20% · 최근 6개월 실거래 기준으로 비교했어요" 문구로 렌더링된다.
 
 `status`가 `AVAILABLE`/`UNAVAILABLE` 두 값뿐이라 "판정불가(표본부족)"와 "판정불가(주소정보 부족)"·"실패(외부 API 장애)" 같은 세부 유형을 코드값으로는 구분하지 않지만, `message`가 사유별로 다른 문장을 내려주기 때문에 **사용자에게 보여지는 결과 기준으로는 사실상 구분이 됨**(코드로 분기하고 싶은 경우에만 여전히 한계).
 
@@ -66,3 +70,20 @@ export type MarketComparisonDto = {
 4. ~~"정확한 시세를 보장하지 않는다"는 시세 비교 전용 면책 문구가 없음~~ → 추가됨
 5. 비교 대상 면적오차 범위(±20% 등 구체적 기준)를 사용자에게 보여주진 않음 — DTO 자체에 이 정보가 없어서 BE 응답 확장이 선행돼야 함
 6. "마지막 조회 시간"(계산이 실제로 언제 실행됐는지)은 여전히 없음 — 다만 비교가 매 요청 실시간 계산이라 개념적으로 "기준일"과 겹치는 정보라 실익이 있는지는 확인 필요
+
+## 전수조사 결과 (2026-08-12)
+
+이 문서의 "범위" 서술대로 실제 소비 지점은 상세화면(`app/mappers/property.ts`, `PropertyDetailClient.tsx`) 뿐이며, 그 경로는 이미 확인한 대로 완전히 연동되어 있음을 재확인했다. 추가로 목록화면(`GET /properties`)에서도 `marketComparison`을 일부 소비하는 지점(`mapPropertyListItemDto`, `PropertiesClient.tsx`)이 있어 이번에 함께 확인했다 — 아래는 그 결과다.
+
+### 버그/정확성
+
+1. 특별히 발견된 이슈 없음 — 상세화면 경로(`mapMarketComparisonDto`, `PropertyDetailClient.tsx`)는 `status`/`referencePrice`/`differenceRate`/`sampleCount`/`referenceDate`/`radiusMeters`/`message` 전부를 BE DTO 그대로 옮기고 null 처리(`?? undefined`)도 일관되게 하고 있어 매핑 자체의 오류는 확인되지 않았다.
+
+### 보안
+
+1. 특별히 발견된 이슈 없음 — 이 도메인 FE 코드는 BE가 계산해 내려준 값을 그대로 표시만 하고, 좌표/반경 등 사용자 입력을 서버에 전달하는 경로가 없다. `message` 필드(자유 텍스트)를 `PropertyDetailClient.tsx`가 그대로 렌더링하는 부분(266번째 줄)도 React가 기본적으로 텍스트를 이스케이프하므로 XSS 위험은 없다(값 자체도 BE가 고정 문구 중 하나로만 채워주는 값이라 사용자 입력이 섞이지 않음).
+
+### 코드 품질 (중복/구조/일관성)
+
+1. **목록 카드가 BE의 판정불가 사유(`message`)를 전혀 노출하지 않고, "연동 예정"이라는 부정확한 문구로 뭉뚱그림** — `app/mappers/property.ts`의 `mapPropertyListItemDto`(114-143번째 줄)는 `marketComparison.status !== 'AVAILABLE'`이면 `marketDelta`를 `undefined`로만 남기고, `PropertiesClient.tsx`(380-393번째 줄)는 그 `undefined`를 "실거래가 연동 예정"이라는 문구로 표시한다. 그런데 실제로는 BE가 이미 계산을 마치고 구체적 판정불가 사유(월세라 비교 대상 아님/단독다가구/표본부족 등)를 `message`로 내려주는 경우도 전부 이 문구로 합쳐진다 — "연동 예정"은 "기능이 아직 없다"는 뜻인데 실제로는 기능이 있고 판정불가일 뿐이라 사용자에게 잘못된 인상을 줄 수 있다. `mapPropertyListItemDto`의 주석(117-120번째 줄)도 "카드 UI 자체는 아직 이 둘을 구분해 보여주지 않고 둘 다 '준비 중'으로만 표시한다(추후 개선 여지)"고 스스로 인지하고 있는 상태 — 상세화면처럼 `message`를 짧게라도 노출하거나 최소한 문구를 "판정 결과 없음"이 아니라 사유를 반영하는 방향으로 다듬는 개선이 유효해 보인다.
+2. **backend-design.md와의 문서 불일치** — backend 쪽 `market-data-design.md`의 "남은 이슈 1. FE 연동 미완료"는 이 문서(및 실제 코드)가 이미 보여주듯 사실과 다르다. 두 문서가 서로 다른 시점의 상태를 서술하고 있어 `cross-domain-summary.md`를 포함해 상호 참조하는 문서들의 갱신이 필요하다(backend 문서 쪽에 이번 전수조사에서 갱신 필요 항목으로 이미 추가해둠).

@@ -49,6 +49,7 @@ NEXT_PUBLIC_KAKAO_MAP_APP_KEY=your_kakao_javascript_key
 
 - `/` — 랜딩
 - `/login`, `/signup`, `/oauth/callback` — 인증
+- `/forgot-password`, `/reset-password` — 비밀번호 찾기(재설정)
 - `/home` — 홈
 - `/properties`, `/properties/register`, `/properties/[id]`, `/properties/[id]/edit` — 매물
 - `/properties/[id]/checklist` — 매물별 체크리스트

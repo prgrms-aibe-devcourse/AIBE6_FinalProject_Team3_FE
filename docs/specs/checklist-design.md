@@ -8,12 +8,13 @@
 
 ## 주요 화면 / 파일
 
-| 파일                                                                    | 역할                                                                                                                                   |
-| ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `app/(main)/properties/[id]/checklist/page.tsx` + `ChecklistClient.tsx` | 체크리스트 생성/조회/항목확인/결과확인 화면                                                                                            |
-| `app/(main)/checklists/page.tsx` + `ChecklistOverviewClient.tsx`        | 매물별 체크리스트 현황 목록 (요구사항엔 없는 화면 — 아래 "추가 구현" 참고)                                                             |
-| `app/services/checklist.ts`                                             | `POST/GET /properties/{id}/checklists`, `PATCH /checklists/{id}/items/{itemId}`, `GET /checklists/{id}/result`, `GET /checklists`(2026-08-06부터 페이지네이션 파라미터 지원) 호출 |
-| `app/data/checklist.ts`                                                 | 5개 카테고리 탭 정의(아이콘/이름/순서)                                                                                                 |
+| 파일                                                                            | 역할                                                                                                                                                                              |
+| ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `app/(main)/properties/[id]/checklist/page.tsx` + `ChecklistClient.tsx`         | 체크리스트 생성/조회/항목확인/결과확인 화면                                                                                                                                       |
+| `app/(main)/properties/[id]/checklist/ChecklistItemImages.tsx`(2026-08-14 신규) | 문항별 참고 이미지 썸네일 + 확대 모달                                                                                                                                             |
+| `app/(main)/checklists/page.tsx` + `ChecklistOverviewClient.tsx`                | 매물별 체크리스트 현황 목록 (요구사항엔 없는 화면 — 아래 "추가 구현" 참고)                                                                                                        |
+| `app/services/checklist.ts`                                                     | `POST/GET /properties/{id}/checklists`, `PATCH /checklists/{id}/items/{itemId}`, `GET /checklists/{id}/result`, `GET /checklists`(2026-08-06부터 페이지네이션 파라미터 지원) 호출 |
+| `app/data/checklist.ts`                                                         | 5개 카테고리 탭 정의(아이콘/이름/순서)                                                                                                                                            |
 
 ## 체크리스트 생성 — 요구사항 대비
 
@@ -85,6 +86,15 @@
 - **완료/미흡 버튼 취소(토글)**(2026-07-31 추가) — CHECK 타입 항목에서 이미 "완료" 또는 "미흡" 상태인 버튼을 실수로 다시 누르면, 저장을 반복하는 대신 미확인 상태(`checked: false`)로 되돌리도록 함. Backend `ChecklistItem.check(false)`가 이미 `checked`/`userNote`를 함께 초기화해주는 걸 확인하고 반영 — 새 API 없이 기존 PATCH만 재사용
 - **"체크리스트 완료" 버튼**(2026-07-30 추가, 2026-07-31 보강) — 전체 항목(일반+필수 모두, `progressPercent === 100`)을 다 체크해야 활성화되는 버튼. 클릭하면 "정말로 체크 다 하셨나요?" 확인 모달이 뜨고, 확인 시 새 API 호출 없이 홈(`/home`)으로 이동만 함(항목별 저장은 이미 개별 PATCH로 자동 처리되고 있어 별도 저장 API가 필요 없음). **(2026-07-31 추가)** 비활성 상태일 때 이유를 알 수 없다는 문제를 보완해, 버튼 위에 "아직 확인하지 않은 항목이 N개 남았어요(일반 항목 포함)" 안내 문구를 표시(`items` 로컬 상태 기준으로 계산해 summary 재조회 지연과 무관하게 항상 정확함)
 - **"최종 점검일" 표시**(2026-07-30 자리만 추가, 2026-07-31 실데이터 연동 완료) — "내 체크리스트 목록"(`/checklists`) 카드 우측 상단에 `lastCheckedAt` 실제 값 표시. Backend가 `ChecklistOverviewResponse.lastCheckedAt`(체크리스트 있으면 `checklist.updatedAt`, 없으면 `property.updatedAt` 대체)을 추가하고 목록 자체도 이 값 기준 최신순으로 정렬해서 내려주도록 구현 — FE는 정렬 로직 없이 응답 순서를 그대로 표시
+- **문항별 참고 이미지 표시**(2026-08-14 추가, 2026-08-14 관리자 CRUD 연동 완료) — 요구사항엔 없는 기능. Backend가 문항 템플릿에 관리자가 등록한 참고 이미지(`ChecklistItemTemplateImage`, AI 생성 예시 사진)를 붙일 수 있게 되면서, `ChecklistItemResponse.images: List<String>`로 내려주도록 바뀜. FE는 `ChecklistItem.images: string[]` 필드를 추가하고, 새 컴포넌트 `ChecklistItemImages.tsx`로 문항 카드에 가로 스크롤 썸네일 + 클릭 시 확대 모달(기존 공용 `Modal.tsx` 재사용)을 표시. "이 사진은 AI가 생성한 예시 이미지입니다." 캡션을 1회 노출. 이미지는 문항 템플릿에 귀속되고 체크리스트 생성 시점에 스냅샷 복사되지 않아, 관리자가 이미지를 교체하면 이미 만들어진 체크리스트에도 그대로 반영됨(Backend 설계 의도). **관리자용 이미지 관리**: Backend가 `GET/POST /admin/checklist-templates/{id}/images` + `DELETE .../{imageId}`(파일 업로드는 지원 안 함, 이미 S3에 올라간 이미지의 URL만 입력)를 추가하면서 FE도 `AdminChecklistTemplatesClient.tsx`의 수정 모달 안에 이미지 목록/추가/삭제 섹션을 구현함
+- **다중 선택지 문항(`MULTIPLE_CHOICE`) 지원**(2026-08-14 추가, 2026-08-14 관리자 폼 연동 완료) — 요구사항의 CHECK/YES_NO/DATE/DOCUMENT_REQUEST 4종 외에, Backend가 이진 판정으로 담기 어려운 항목(예: "보일러 종류가 무엇인가요?", "냉난방 방식이 무엇인가요?")을 위해 새 문항 타입 `MULTIPLE_CHOICE`(선택지 목록 `options: List<String>`)를 추가함. FE는 `ChecklistItemType`에 `multipleChoice`를 추가하고, `ChecklistClient.tsx`에 기존 Y/N·서류요청 버튼 그룹과 동일한 패턴(`handleAnswer` 재사용)으로 선택지 버튼을 렌더링(버튼은 `flex-1`로 한 줄에 균등하게 배치). **관리자용 선택지 입력**: Backend 관리자 API(`AdminChecklistItemTemplateCreateRequest.options` 등)가 준비되면서 FE도 `AdminChecklistTemplatesClient.tsx`의 생성/수정 폼에 "응답 방식"이 선택지 응답일 때만 나타나는 콤마 구분 선택지 입력란을 추가함
+- **체크리스트 목록에 진행률(%) 표시**(2026-08-18 추가) — 기존엔 홈 위젯(`ChecklistProgressWidget`)·마이페이지·매물 목록(`PropertyListItem`)은 진행률(%)을 보여주는데 `/checklists` 목록만 상태 배지("진행 중"/"완료")만 있어 화면 간 통일성이 없었음. Backend가 `ChecklistOverviewResponse`에 `progressPercent`/`cautionCount`를 추가하고, `ChecklistService.listMyChecklists()`가 기존 목록 조회 쿼리 외에 `ChecklistItemRepository.findProgressByUserId()`(매물별 `GROUP BY` 집계) 쿼리 1개를 추가로 호출해 매물마다 개별 조회 없이(N+1 없이) 진행률을 계산, `Map<propertyId, ...>`으로 병합해서 응답에 실어줌. FE는 `ChecklistOverviewDto`/`ChecklistOverview`에 optional 필드(`progressPercent`/`cautionCount`, `NOT_STARTED`는 값 자체가 `undefined`로 0%와 구분)로 추가하고, 카드의 주소 아래에 회색 박스 + 진행률 바(홈 위젯과 동일한 시각 언어)로 표시. `IN_PROGRESS`는 teal, `COMPLETED`는 상태 배지와 동일한 emerald 톤을 써서 완료 여부가 색으로도 구분됨. mock(`getMockChecklistOverviews`)도 `getMockChecklistResult`와 동일한 계산 로직을 그대로 재사용
+- **체크리스트 상세 화면 뒤로가기를 실제 진입 경로 기준으로 변경**(2026-08-18) — `ChecklistClient.tsx`의 뒤로가기 화살표가 원래 항상 `/properties/{id}`(매물 상세)로 고정된 `<Link>`였는데, 위 진행률 기능 추가로 `/checklists` 목록에서도 이 화면에 직접 진입하게 되면서(그 외에도 홈 위젯·계약 분석 결과 화면에서 진입 가능) 그 경로들로 들어온 경우 뒤로가기를 눌러도 원래 있던 화면이 아니라 항상 매물 상세로 이동하는 문제가 드러남. 고정 링크 대신 `router.back()`(브라우저 히스토리 기반)으로 교체해서 실제로 진입했던 화면으로 돌아가도록 수정
+- **참고 사진 확대 모달에 이전/다음 이동 추가**(2026-08-19, 사용자 피드백) — 문항 참고 이미지가 여러 장일 때 확대해서 보다가 다른 사진을 보려면 모달을 닫았다가 다시 열어야 하는 불편함이 있었음. `ChecklistItemImages.tsx`의 확대 모달에 이미지가 2장 이상이면 좌우 화살표 버튼과 `N / 총개수` 카운터를 추가. 여러 화면(11곳)에서 공용으로 쓰는 `Modal.tsx` 자체는 건드리지 않고 갤러리 이동 로직은 이 컴포넌트의 children 안에서만 처리해 다른 화면에 영향 없음
+- **"필수 확인 누락 N개" 클릭 시 해당 항목으로 이동**(2026-08-19, 사용자 피드백) — 기존엔 회색 텍스트일 뿐이라 어떤 항목이 누락됐는지 바로 확인할 방법이 없었음. `ChecklistClient.tsx`에 `missingRequiredItems`(로컬 `items` 상태 기준 계산)를 추가하고, 누락이 1개 이상이면 이 텍스트를 버튼으로 바꿔 클릭 시 첫 번째 누락 항목의 카테고리 탭으로 전환 + 해당 항목으로 스크롤 + 2초간 주황 테두리(`ring-2 ring-orange-400`)로 하이라이트. 누락 0개면 그대로 클릭 불가한 일반 텍스트
+- **채광/수압/냉난방/층간소음/외부소음 5개 항목에 구체적 확인 방법 안내 + 양호/보통/미흡 응답 추가**(2026-08-19, 사용자 피드백) — 기존엔 서술형 질문(예: "채광은 충분한가요?")에 완료/미흡 2버튼뿐이고 `guideText`도 없어 무엇을 기준으로 판단해야 하는지 안내가 없었음. 5개 항목 모두 질문을 상태 평가형으로 바꾸고(예: "채광 상태는 어떤가요?"), `guideText`에 시간대별·위치별 구체적 확인 방법을 추가, `itemType`을 `CHECK`에서 기존 `MULTIPLE_CHOICE`(이 세션에 앞서 추가된 타입, 위 항목 참고)로 전환해 `양호/보통/미흡` 3지선다로 답하도록 함. FE mock(`app/mocks/init/checklist.ts`)에 반영 완료. 실 템플릿도 관리자 화면(`/admin/checklists`)에서 동일하게 전환해 실 DB 저장까지 확인함 — **기존에 테스트용으로 이미 생성돼 있던 체크리스트는 생성 시점 스냅샷(`ChecklistItem` 주석 참고)이라 템플릿 전환이 소급 반영되지 않는데, 아직 테스트 단계라 그 데이터를 마이그레이션하지 않고 그대로 두기로 결정**(나중에 필요하면 재생성)
+  - **"미흡" 선택 시 자동 주의 항목(issueFound) 판정 추가**(2026-08-19, Backend) — `ChecklistItem.answerMultipleChoice()`에 `issueFound` 자동판정을 추가. `answerYesNo()`는 문항마다 Y/N의 의미가 달라 `code` 기준 개별 분기가 필요했지만, "미흡"은 어떤 문항이든 항상 같은 의미(주의 필요)라 `"미흡".equals(rawValue)` 한 줄로 충분해 분기 없이 처리. 처음엔 "구체적으로 어떤 문항/선택지인지 정해지지 않았다"는 이유로 코드 대신 주석만 남기고 보류하는 안이 나왔으나, 그 사이 실제로 항목·선택지가 이미 확정된 상태였고 로직도 단순해 리스크 대비 이득이 크다고 판단해 즉시 구현하는 쪽으로 결정 변경. FE mock의 `updateMockChecklistItem`(`checklistRepository.ts`)도 동일 규칙(`request.value === '미흡'`)으로 동기화함 — 다만 YES_NO/DOCUMENT_REQUEST의 `code` 기반 자동판정 규칙은 mock `ChecklistItemDto`에 `code` 필드 자체가 없어 이번에도 재현하지 못함(아래 "남은 이슈" 10번 참고). "미흡" 선택에 별도 메모(자유 텍스트)는 추가하지 않기로 함 — CHECK 타입의 메모는 체크 여부만으로는 정보가 전혀 없어 필요했지만, MULTIPLE_CHOICE는 "미흡" 선택 자체가 문항 내용과 결합해 이미 맥락을 주고, 메모까지 넣으면 BE/FE 둘 다 스코프가 커진다고 판단
+  - **"미흡" 선택지만 다른 색상으로 표시**(2026-08-19) — `ChecklistClient.tsx`의 MULTIPLE_CHOICE 버튼 그룹에서 선택된 옵션이 "미흡"이면 다른 선택지(teal)와 달리 orange(주의 항목과 동일 톤)로 표시하도록 분기 추가
 
 ## 남은 이슈 / 확인 필요 총정리
 
@@ -97,3 +107,23 @@
 7. ~~필수 항목 헬퍼 설명(`helperText`)이 FE mock에만 있고 Backend에는 아직 없음~~ ✅ **해결됨(2026-07-31)** — Backend가 `checklist_item_template.helper_text` 컬럼과 시드 데이터를 추가해서 실 API에서도 정상 노출됨
 8. ~~"최종 점검일" 표시 자리는 만들었지만 실제 날짜 데이터가 없음~~ ✅ **해결됨(2026-07-31)** — Backend가 `ChecklistOverviewResponse.lastCheckedAt` 필드와 이 값 기준 정렬을 함께 추가, FE는 `formatDateText`로 포맷만 해서 그대로 표시(당초 "추후로 미루기로" 했던 정렬 로직까지 Backend가 먼저 구현함)
 9. **(2026-07-30, 브레인스토밍 진행 중, 미해결)** "특약사항 분석" 화면과의 여정이 완전히 분리되어 있음 — `/contract/upload`가 `propertyId`를 아예 안 받고, 결과 화면(`ContractResultClient.tsx`)의 "체크리스트로 이동" 버튼도 `/properties/1/checklist`로 고정(`contract-analysis-design.md` 이슈 3번과 동일 사안). 오늘 CTA를 상시 노출로 바꾸면서 이 gap이 더 드러남 — propertyId를 조용히 실어 나르는 방안과, 분석 결과를 매물에 묶어 저장(DB 신규)하는 방안을 논의했지만 범위 확정 전 보류
+10. **(2026-08-19 발견, 미해결)** mock `updateMockChecklistItem`(`checklistRepository.ts`)의 값-응답 분기는 "미흡" 문자열 하나만 `issueFound`로 판정하고, YES_NO/DOCUMENT_REQUEST의 `code` 기반 자동판정 규칙(신탁등기 Y, 명의불일치 Y, 서류 미제공)은 재현하지 않음 — mock `ChecklistItemDto` 타입 자체에 `code` 필드가 없어서다. 즉 mock 모드에서는 이 항목들에 "미흡"에 해당하는 값을 답해도 주의 항목으로 안 잡힌다(실 API는 정상 동작). 코드 자체는 이번에 처음 발견한 게 아니라 기존부터 있던 갭이라 이번 "미흡" 작업 범위에서는 손대지 않음
+
+## 전수조사 결과 (2026-08-12)
+
+### 버그/정확성
+
+특별히 발견된 이슈 없음.
+
+- `app/lib/pageParam.ts`의 `parsePageParam`이 `?page=` 쿼리에 문자열/음수/소수 등 무엇이 와도 `Number.isInteger(parsed) && parsed >= 0`로 걸러 0(첫 페이지)으로 정규화하므로, `/checklists?page=abc`나 `?page=-1` 같은 조작에도 백엔드에 잘못된 값이 그대로 넘어가지 않음을 확인.
+- `ChecklistOverviewClient.tsx`의 이전/다음 페이지 링크가 `page`(현재)와 `hasNext`(백엔드 값)를 그대로 사용하고 있어, 화면에서 계산한 `totalPages`와 서버가 내려준 `hasNext`가 어긋날 여지가 없음.
+- `services/checklist.ts`의 `checklistRequestsInFlight` in-flight 공유 로직을 재검증 — GET이 성공하든 404로 POST 재시도를 하든 실패하든, `.finally()`에서 항상 `propertyId` 키를 지우므로 다음 호출이 오래된 Promise를 재사용해 멈춰있는 문제는 없음.
+
+### 보안
+
+특별히 발견된 이슈 없음. FE는 Backend가 이미 소유권/삭제 여부를 검증한 응답을 그대로 신뢰하는 구조이고, 이 문서가 다루는 파일들(`ChecklistOverviewClient.tsx`, `services/checklist.ts`, `repositories/checklistRepository.ts`, `mappers/checklist.ts`) 안에서 별도의 권한 판단이나 사용자 입력을 신뢰하는 로직이 없음을 확인.
+
+### 코드 품질 (중복/구조/일관성)
+
+1. **`checklistRepository.ts`의 mock `updateMockChecklistItem`이 실제 Backend `ChecklistItem.check()`의 "userNote 초기화" 규칙과 미묘하게 다르게 구현됨** — 실제 서버는 `check(boolean)` 호출 시 `issueFound`는 원래 CHECK 타입 항목에서 절대 true가 될 수 없는 필드라 손대지 않아도 안전하지만, mock의 `'checked' in request` 분기(`checklistRepository.ts:29-31`)는 `issueFound: false`를 명시적으로 강제 설정한다. 결과적으로 동작(항상 false)은 동일하지만, "왜 항상 false인지"에 대한 근거가 mock과 실제 서버에서 서로 다른 코드 경로(mock: 하드코딩 / 서버: 타입 검증으로 인한 불변식)로 갈라져 있어, 나중에 실제 서버 로직이 바뀌면 mock이 조용히 실제와 달라질 수 있는 구조다. 지금 당장 관찰 가능한 버그는 아니라 코드 품질 관점의 참고사항으로만 기록.
+2. ~~`ChecklistOverviewClient.tsx`가 매물의 실제 표시명(title) 대신 매물유형 문자열로 조합한 제목을 씀~~ ✅ **해결됨(2026-08-13)** — Backend `ChecklistOverviewResponse`에 `title` 필드가 추가되면서, FE도 `ChecklistOverviewDto`에 `title: string`을 추가하고 `mapChecklistOverviewDto`(`mappers/checklist.ts:85`)가 `${propertyTypeLabelMap[dto.propertyType]} 매물` 조합 대신 `dto.title`을 그대로 쓰도록 변경. 이제 매물 목록 화면과 체크리스트 목록 화면이 같은 매물에 대해 동일한 이름을 보여줌.

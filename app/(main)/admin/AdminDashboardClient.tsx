@@ -57,6 +57,21 @@ function formatDate(dateString: string): string {
   return `${month}/${day}`;
 }
 
+// 배열 인덱스로 두 시계열을 짝짓지 않는다 - signups[i]와 propertyRegistrations[i]가 항상 같은
+// 날짜라는 보장은 코드상 없다(둘 다 백엔드가 날짜 범위를 하루도 빠짐없이 채워서 보통은 같은
+// 길이/순서로 오지만, 그 전제가 어긋나는 경계 케이스가 생기면 인덱스 매칭은 조용히 엉뚱한 날짜
+// 아래 다른 날짜의 값을 그려버린다). 실제 date 값으로 맞춰야 그런 경우에도 최소한 값이 밀리지
+// 않는다(그 날짜의 매물등록 데이터가 아예 없으면 0으로 처리). 컴포넌트에서 분리해 단위테스트
+// 가능하게 한다.
+export function buildTrendData(trends: AdminDashboardStatsDto['trends']) {
+  const propertyRegistrationsByDate = new Map(trends.propertyRegistrations.map((point) => [point.date, point.count]));
+  return trends.signups.map((point) => ({
+    date: formatDate(point.date),
+    가입자: point.count,
+    매물등록: propertyRegistrationsByDate.get(point.date) ?? 0,
+  }));
+}
+
 export function AdminDashboardClient({ stats, loadError, startDate, endDate }: AdminDashboardClientProps) {
   const router = useRouter();
   const [rangeStart, setRangeStart] = useState(startDate);
@@ -124,11 +139,7 @@ export function AdminDashboardClient({ stats, loadError, startDate, endDate }: A
     return null;
   }
 
-  const trendData = stats.trends.signups.map((point, index) => ({
-    date: formatDate(point.date),
-    가입자: point.count,
-    매물등록: stats.trends.propertyRegistrations[index]?.count ?? 0,
-  }));
+  const trendData = buildTrendData(stats.trends);
 
   const registrationData = stats.distributions.byPropertyRegistration.map((item) => ({
     name: REGISTRATION_LABEL[item.registered ? 'true' : 'false'],
@@ -153,17 +164,16 @@ export function AdminDashboardClient({ stats, loadError, startDate, endDate }: A
       </p>
 
       <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <SummaryCard label="신규 가입자" value={`${stats.summary.totalUsers.toLocaleString()}명`} icon={Users} />
-        {/* 아래 추이 차트의 "매물등록"은 삭제된 매물도 등록 발생 자체로 집계하지만(백엔드
-            PropertyRepository.findCreatedAtBetween 참고), 이 카드는 활성 상태만 센다(countByStatus
-            AndCreatedAtBetween) - 같은 화면에서 두 숫자가 다른 기준으로 안 맞아 보이는 걸 막기 위해
-            라벨에 "활성"임을 명시한다. */}
-        <SummaryCard label="신규 활성 매물" value={`${stats.summary.totalProperties.toLocaleString()}건`} icon={Home} />
+        <SummaryCard label="신규 가입자" value={`${stats.summary.newUsers.toLocaleString()}명`} icon={Users} />
+        {/* 아래 추이 차트의 "매물등록"과 이 카드는 이제 동일한 기준(status 무관, 등록 "발생" 자체)을
+            쓴다(백엔드 PropertyRepository.countByCreatedAtBetween 참고) - 예전엔 이 카드만 ACTIVE로
+            필터링해 두 숫자가 어긋났었다. */}
+        <SummaryCard label="신규 매물" value={`${stats.summary.newProperties.toLocaleString()}건`} icon={Home} />
         <SummaryCard
           label="신규 대기 신고"
-          value={`${stats.summary.pendingReports.toLocaleString()}건`}
+          value={`${stats.summary.newPendingReports.toLocaleString()}건`}
           icon={FileWarning}
-          tone={stats.summary.pendingReports > 0 ? 'orange' : 'default'}
+          tone={stats.summary.newPendingReports > 0 ? 'orange' : 'default'}
         />
       </div>
 
@@ -210,25 +220,36 @@ export function AdminDashboardClient({ stats, loadError, startDate, endDate }: A
 
       <div className="ansim-card p-5 lg:w-2/3">
         <h2 className="text-sm font-bold text-slate-700">매물 등록 여부별 유저 분포</h2>
-        <p className="mb-4 text-xs text-slate-400">선택한 기간에 가입한 사람 중, 매물을 등록한 사람 vs 등록하지 않은 사람</p>
-        <ResponsiveContainer width="100%" height={280}>
-          <PieChart margin={{ top: 20, right: 40, bottom: 20, left: 40 }}>
-            <Pie
-              data={registrationData}
-              dataKey="value"
-              nameKey="name"
-              innerRadius={60}
-              outerRadius={90}
-              label={({ name, value }) => `${name} ${value}`}
-            >
-              {registrationData.map((entry) => (
-                <Cell key={entry.name} fill={entry.color} />
-              ))}
-            </Pie>
-            <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8 }} />
-            <Legend wrapperStyle={{ fontSize: 12 }} />
-          </PieChart>
-        </ResponsiveContainer>
+        <p className="mb-4 text-xs text-slate-400">
+          선택한 기간에 가입한 사람 중, 매물을 등록한 사람 vs 등록하지 않은 사람
+        </p>
+        {registrationData.every((item) => item.value === 0) ? (
+          // 신고 사유별 분포(막대그래프)와 같은 이유 - 선택한 기간에 신규 가입자가 0명이면 두
+          // 항목 다 0이 되어 Recharts가 슬라이스 각도를 나눌 총합이 0인 채로 그리게 된다(깨진
+          // 도넛으로 렌더링됨). 바로 옆 막대그래프는 이미 이 처리가 있는데 파이차트만 빠져 있었다.
+          <p className="flex h-[280px] items-center justify-center text-sm text-slate-400">
+            선택한 기간에 가입한 사람이 없습니다.
+          </p>
+        ) : (
+          <ResponsiveContainer width="100%" height={280}>
+            <PieChart margin={{ top: 20, right: 40, bottom: 20, left: 40 }}>
+              <Pie
+                data={registrationData}
+                dataKey="value"
+                nameKey="name"
+                innerRadius={60}
+                outerRadius={90}
+                label={({ name, value }) => `${name} ${value}`}
+              >
+                {registrationData.map((entry) => (
+                  <Cell key={entry.name} fill={entry.color} />
+                ))}
+              </Pie>
+              <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8 }} />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+            </PieChart>
+          </ResponsiveContainer>
+        )}
       </div>
     </div>
   );

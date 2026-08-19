@@ -9,8 +9,11 @@ export function getKakaoLoginUrl(): string {
   return `${getApiBaseUrl()}/oauth2/authorization/kakao`;
 }
 
-export async function getCurrentUser(cookieHeader?: string): Promise<MeResponseDto> {
-  return requestJson<MeResponseDto>('/auth/me', cookieHeader ? { headers: { Cookie: cookieHeader } } : undefined);
+export async function getCurrentUser(cookieHeader?: string, signal?: AbortSignal): Promise<MeResponseDto> {
+  return requestJson<MeResponseDto>('/auth/me', {
+    ...(cookieHeader ? { headers: { Cookie: cookieHeader } } : undefined),
+    signal,
+  });
 }
 
 // 랜딩 페이지(공개)처럼 "로그인 여부에 따라 CTA만 살짝 바꾸는" 용도의 비강제 확인용. getCurrentUser()는
@@ -52,6 +55,38 @@ export async function signup(input: LocalSignupInput): Promise<MeResponseDto> {
   return requestJson<MeResponseDto>('/auth/signup', {
     method: 'POST',
     body: JSON.stringify(input),
+  });
+}
+
+// 회원가입 폼에서 이메일 입력 후 "인증번호 발송"을 누르면 호출한다 - 계정은 아직 만들지 않는다.
+export async function requestEmailVerification(email: string): Promise<void> {
+  await requestJson<void>('/auth/email-verification/request', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  });
+}
+
+// 인증번호 확인에 성공하면 서버가 이 이메일에 대해 30분간 유효한 인증 완료 기록을 남긴다 -
+// 이어지는 signup() 호출이 그 기록을 확인한다.
+export async function confirmEmailVerification(email: string, code: string): Promise<void> {
+  await requestJson<void>('/auth/email-verification/confirm', {
+    method: 'POST',
+    body: JSON.stringify({ email, code }),
+  });
+}
+
+// 항상 성공(200)으로 응답한다 - 계정 존재 여부를 노출하지 않기 위함(백엔드 PasswordResetService 참고).
+export async function requestPasswordReset(email: string): Promise<void> {
+  await requestJson<void>('/auth/password-reset/request', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function confirmPasswordReset(token: string, newPassword: string): Promise<void> {
+  await requestJson<void>('/auth/password-reset/confirm', {
+    method: 'POST',
+    body: JSON.stringify({ token, newPassword }),
   });
 }
 

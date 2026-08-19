@@ -3,10 +3,10 @@
 import { ArrowLeft, Sparkles, User } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { regions } from '../../../data/regions_nested';
 import { userCurrentStageOptions, userTransactionTypeOptions } from '../../../data/user';
-import { ApiError } from '../../../lib/api/http';
+import { resolveErrorMessage } from '../../../lib/resolveErrorMessage';
 import {
   checkNicknameAvailability,
   registerProfile,
@@ -14,6 +14,7 @@ import {
   updateMyProfile,
   uploadProfileImage,
 } from '../../../services/user';
+import { type NicknamePolicyDto } from '../../../types/api';
 import { type ProfileUpdateInput, type UserProfile } from '../../../types/domain';
 import { NoticeBox } from '../../../ui/NoticeBox';
 
@@ -26,6 +27,7 @@ type ProfileClientProps = {
   profile: UserProfile;
   mode: ProfileMode;
   loadError?: string;
+  nicknamePolicy: NicknamePolicyDto;
 };
 
 function toFormValues(profile: UserProfile): ProfileUpdateInput {
@@ -98,7 +100,7 @@ function buildInterestRegion(sido: string, sigungu: string, eupmyeondong: string
   return parts.join(' ');
 }
 
-export function ProfileClient({ profile, mode, loadError }: ProfileClientProps) {
+export function ProfileClient({ profile, mode, loadError, nicknamePolicy }: ProfileClientProps) {
   const router = useRouter();
   const [formValues, setFormValues] = useState<ProfileUpdateInput>(toFormValues(profile));
   const initialLocation = parseInterestRegion(profile.interestRegion);
@@ -116,9 +118,12 @@ export function ProfileClient({ profile, mode, loadError }: ProfileClientProps) 
   // 기본 이미지로 되돌리기도 새 사진 선택과 마찬가지로 저장 버튼을 눌러야 실제로 반영된다.
   const [imageResetRequested, setImageResetRequested] = useState(false);
   const [nicknameCheckStatus, setNicknameCheckStatus] = useState<
-    'idle' | 'checking' | 'available' | 'duplicate' | 'error'
+    'idle' | 'checking' | 'available' | 'duplicate' | 'invalid' | 'error'
   >('idle');
   const [nicknameRequiredError, setNicknameRequiredError] = useState(false);
+  // nicknamePolicy.pattern은 <input pattern="...">용 비앵커 정규식이라, JS에서 전체 문자열 일치를
+  // 확인하려면 브라우저가 암묵적으로 해주는 ^(?:...)$ 감싸기를 직접 재현해야 한다.
+  const nicknamePattern = useMemo(() => new RegExp(`^(?:${nicknamePolicy.pattern})$`), [nicknamePolicy.pattern]);
 
   const sigunguOptions = getSigunguOptions(sido);
   const eupmyeondongOptions = getEupmyeondongOptions(sido, sigungu);
@@ -207,6 +212,10 @@ export function ProfileClient({ profile, mode, loadError }: ProfileClientProps) 
       setNicknameCheckStatus('error');
       return;
     }
+    if (!nicknamePattern.test(nickname)) {
+      setNicknameCheckStatus('invalid');
+      return;
+    }
 
     setNicknameCheckStatus('checking');
     setNicknameRequiredError(false);
@@ -234,13 +243,19 @@ export function ProfileClient({ profile, mode, loadError }: ProfileClientProps) 
     setIsSaving(true);
     setSaveError(undefined);
 
+    // 이미지 처리와 필드 저장은 별도 API 호출이라(백엔드가 하나의 트랜잭션으로 묶어주지 않음),
+    // 이미지가 이미 반영된 뒤 필드 저장만 실패하면 사용자에게 "저장이 통째로 실패했다"고 오해를
+    // 주지 않도록 그 사실을 에러 메시지에 덧붙인다.
+    let imageAlreadyApplied = false;
     try {
       // 프로필 사진은 presign/confirm(또는 삭제) 전용 엔드포인트로 별도 처리한다 -
       // registerProfile/updateMyProfile 둘 다 profileImageUrl을 받지 않는다.
       if (selectedImageFile) {
         await uploadProfileImage(selectedImageFile);
+        imageAlreadyApplied = true;
       } else if (imageResetRequested) {
         await resetProfileImage();
+        imageAlreadyApplied = true;
       }
 
       if (mode === 'register') {
@@ -249,12 +264,13 @@ export function ProfileClient({ profile, mode, loadError }: ProfileClientProps) 
         await updateMyProfile(formValues);
       }
       // 최초 등록(온보딩)은 분기 결과가 반영된 홈 화면으로, 이후 수정은 원래 있던 마이페이지로 되돌아간다.
-      router.push(mode === 'register' ? '/home' : '/mypage');
+      // register 성공 시에만 notice를 붙여, 홈 화면이 이번이 등록 직후 첫 방문임을 알고 사용법
+      // 안내 모달(OnboardingIntroModal)을 한 번 띄우게 한다.
+      router.push(mode === 'register' ? '/home?notice=profile_registered' : '/mypage');
       router.refresh();
     } catch (error) {
-      setSaveError(
-        error instanceof ApiError ? error.message : '프로필 저장에 실패했습니다. 잠시 후 다시 시도해 주세요.',
-      );
+      const message = resolveErrorMessage(error, '프로필 저장에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+      setSaveError(imageAlreadyApplied ? `사진은 이미 반영되었습니다. ${message}` : message);
     } finally {
       setIsSaving(false);
     }
@@ -364,6 +380,8 @@ export function ProfileClient({ profile, mode, loadError }: ProfileClientProps) 
                     placeholder="2~20자로 입력해 주세요"
                     minLength={2}
                     maxLength={20}
+                    pattern={nicknamePolicy.pattern}
+                    title={nicknamePolicy.message}
                     required
                   />
                   <button
@@ -380,6 +398,9 @@ export function ProfileClient({ profile, mode, loadError }: ProfileClientProps) 
                 )}
                 {nicknameCheckStatus === 'duplicate' && (
                   <p className="mt-1.5 text-sm font-bold text-red-600">이미 사용 중인 닉네임입니다.</p>
+                )}
+                {nicknameCheckStatus === 'invalid' && (
+                  <p className="mt-1.5 text-sm text-red-600">{nicknamePolicy.message}</p>
                 )}
                 {nicknameCheckStatus === 'error' && (
                   <p className="mt-1.5 text-sm text-red-600">닉네임 확인에 실패했습니다. 다시 시도해 주세요.</p>

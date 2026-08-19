@@ -27,3 +27,12 @@ export function formatDecimalInput(raw: string): string {
   const formattedInteger = integerPart === '' ? '' : Number(integerPart).toLocaleString('en-US');
   return `${formattedInteger}.${decimalPart}`;
 }
+
+/**
+ * 전용면적(㎡)을 평 단위 문구로 변환한다. 1평 = 3.305785㎡ (공식 환산 계수).
+ * 소수점 첫째 자리까지 반올림해서 보여준다 - 정밀한 값이 아니라 감을 잡기 위한 참고용 병기이므로.
+ */
+export function formatAreaWithPyeong(areaSqm: number): string {
+  const pyeong = areaSqm / 3.305785;
+  return `${areaSqm}㎡ (${pyeong.toFixed(1)}평)`;
+}

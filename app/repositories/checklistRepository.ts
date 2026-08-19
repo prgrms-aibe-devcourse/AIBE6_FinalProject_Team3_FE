@@ -32,7 +32,10 @@ export function updateMockChecklistItem(itemId: number, request: ChecklistItemUp
     if ('userNote' in request) {
       return { ...item, checked: true, userNote: request.userNote, issueFound: true };
     }
-    return { ...item, value: request.value, checked: true };
+    // Backend ChecklistItem.answerMultipleChoice()와 동일한 규칙 - "미흡"은 문항과 무관하게
+    // 항상 주의 항목으로 취급한다. YES_NO/DOCUMENT_REQUEST의 code 기반 자동판정 규칙은
+    // mock ChecklistItemDto에 code 필드 자체가 없어 여기서 재현하지 않는다.
+    return { ...item, value: request.value, checked: true, issueFound: request.value === '미흡' };
   });
 
   const updated = mockChecklistItemDtos.find((item) => item.id === itemId);
@@ -77,17 +80,22 @@ export function getMockChecklistResult(): ChecklistSummary {
   });
 }
 
-// mock 매물 20개를 실 Backend 기본 페이지 크기(20)보다 작게 나눠야 이전/다음 UI를 mock에서도
-// 눈으로 확인할 수 있어, 화면 페이지 크기와 무관한 mock 전용 값을 쓴다.
-const MOCK_CHECKLIST_PAGE_SIZE = 5;
-
 // mock 모드에는 매물별로 분리된 체크리스트 저장소가 없고 전역 mockChecklistItemDtos 하나뿐이라,
 // 목록의 모든 매물이 같은 진행 상태를 공유한다 (실제 API 모드에서는 매물마다 실제로 다르게 나온다).
-export function getMockChecklistOverviews(page = 0): ChecklistOverviewPage {
+// size는 항상 호출부(services/checklist.ts, 실제로는 checklists/page.tsx의 PAGE_SIZE)가 넘겨주는
+// 값을 그대로 쓴다 - mock 전용 상수를 따로 두면 화면이 쓰는 PAGE_SIZE와 나중에 어긋날 수 있다.
+export function getMockChecklistOverviews(page = 0, size = 5): ChecklistOverviewPage {
   const status = deriveMockChecklistStatus();
   // mock에는 매물/체크리스트 각각의 실제 수정 시각이 없어, Backend의 "체크리스트 없으면 매물
   // 수정시각으로 대체" 규칙을 흉내내는 대신 조회 시점을 그대로 쓴다.
   const lastCheckedAt = formatDateText(new Date().toISOString());
+
+  // Backend findProgressByUserId 집계 쿼리와 동일한 규칙을 mock에서도 그대로 흉내낸다
+  // (getMockChecklistResult와 동일 계산) - mock은 전역 상태 하나뿐이라 모든 매물이 같은 값을 공유한다.
+  const totalCount = mockChecklistItemDtos.length;
+  const checkedCount = mockChecklistItemDtos.filter((item) => item.checked).length;
+  const issueCount = mockChecklistItemDtos.filter((item) => item.issueFound).length;
+  const progressPercent = totalCount === 0 ? 0 : Math.round((checkedCount / totalCount) * 100);
 
   const allItems = getMockProperties().map((property) => ({
     propertyId: property.id,
@@ -97,17 +105,19 @@ export function getMockChecklistOverviews(page = 0): ChecklistOverviewPage {
     tradeType: property.type,
     status,
     lastCheckedAt,
+    progressPercent: status === 'NOT_STARTED' ? undefined : progressPercent,
+    cautionCount: status === 'NOT_STARTED' ? undefined : issueCount,
   }));
 
   const totalElements = allItems.length;
-  const totalPages = Math.max(1, Math.ceil(totalElements / MOCK_CHECKLIST_PAGE_SIZE));
-  const start = page * MOCK_CHECKLIST_PAGE_SIZE;
-  const items = allItems.slice(start, start + MOCK_CHECKLIST_PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(totalElements / size));
+  const start = page * size;
+  const items = allItems.slice(start, start + size);
 
   return {
     items,
     page,
-    size: MOCK_CHECKLIST_PAGE_SIZE,
+    size,
     totalElements,
     totalPages,
     hasNext: page + 1 < totalPages,

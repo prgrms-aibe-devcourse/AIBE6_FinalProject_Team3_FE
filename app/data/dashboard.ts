@@ -17,7 +17,10 @@ export const quickActions: QuickAction[] = [
     tone: 'teal',
   },
   {
-    to: '/properties/1',
+    // 매물/신호 상태별로 다르게 연결하는 방향도 검토했으나(getRiskCheckHref, 지금은 삭제됨),
+    // 신호만 걸러 보는 필터가 매물 목록에 아직 없어 실효성이 애매해 일단 전체 목록으로 통일함 -
+    // 그 필터가 생기면 다시 검토.
+    to: '/properties',
     icon: ShieldAlert,
     title: '위험 신호 확인',
     description: '허위매물 의심 신호와 보증금 안전성 수치를 한 번에 확인합니다.',

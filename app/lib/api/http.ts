@@ -1,6 +1,6 @@
 import { type ApiErrorBody, type ApiResponse } from '../../types/api';
 
-export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, '');
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, '');
 
 const REFRESH_TOKEN_COOKIE = 'refresh_token';
 const REFRESH_PATH = '/auth/refresh';
@@ -118,6 +118,16 @@ export async function requestJson<T>(path: string, init?: RequestInit): Promise<
 
     const outcome = await refreshOnceInBrowser();
 
+    // refreshOnceInBrowser()는 여러 호출자가 공유하는 전역 refresh라(위 주석 참고) 이 요청의
+    // AbortSignal로 그 fetch 자체를 끊을 수 없다 - 끊으면 같은 refresh를 기다리는 다른 호출자에게도
+    // 영향을 준다. 대신 결과가 나온 시점에 "이 요청을 만든 호출자가 아직 관심 있는지"를 확인해,
+    // 라우트 이동 등으로 이미 떠난 호출자를 대신해 아래 outcome 처리(특히 redirectToSessionRecover())를
+    // 실행하지 않게 막는다 - 안 그러면 그 시점의 window.location(=이미 이동한 새 페이지)을
+    // 오염시킨다(뒤로가기 401 버그와 같은 원인).
+    if (init?.signal?.aborted) {
+      throw new DOMException('The user aborted a request.', 'AbortError');
+    }
+
     if (outcome === 'success') {
       const retryResponse = await fetchOrThrowNetworkError(path, { ...init, credentials: 'include', headers });
       return finalizeResponse<T>(retryResponse, await readApiResponse<T>(retryResponse));
@@ -166,13 +176,25 @@ let refreshAbortController: AbortController | null = null;
 // 결국 'unreachable'로 정리되게 한다.
 const REFRESH_FETCH_TIMEOUT_MS = 10_000;
 
+// 타임아웃과 resetAuthRefreshState()의 명시적 abort를 하나의 신호로 합친다 - AbortSignal.any는
+// 둘 중 먼저 온 신호로 이 fetch를 끊는다. AbortSignal.any/timeout는 비교적 최신 API라, 이를
+// 지원하지 않는 런타임에서는 이 조합 자체가 동기적으로 예외를 던진다 - 그러면
+// refreshOnceInBrowser() 전체가 깨져서 이 세션의 모든 401이 자동 갱신 대신 강제 재로그인으로
+// 떨어진다. 무한 대기 타임아웃 보호(부가 기능)를 잃더라도, controller.signal만으로 최소한
+// 명시적 abort(resetAuthRefreshState)는 계속 동작해야 하므로 그쪽으로 폴백한다.
+function buildRefreshSignal(controller: AbortController): AbortSignal {
+  try {
+    return AbortSignal.any([controller.signal, AbortSignal.timeout(REFRESH_FETCH_TIMEOUT_MS)]);
+  } catch {
+    return controller.signal;
+  }
+}
+
 function refreshOnceInBrowser(): Promise<BrowserRefreshOutcome> {
   if (!refreshInFlight) {
     const controller = new AbortController();
     refreshAbortController = controller;
-    // 타임아웃과 resetAuthRefreshState()의 명시적 abort를 하나의 신호로 합친다 - AbortSignal.any는
-    // 둘 중 먼저 온 신호로 이 fetch를 끊는다.
-    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(REFRESH_FETCH_TIMEOUT_MS)]);
+    const signal = buildRefreshSignal(controller);
 
     refreshInFlight = fetch(`${getApiBaseUrl()}${REFRESH_PATH}`, {
       method: 'POST',
@@ -255,11 +277,7 @@ function normalizeHeaders(initHeaders?: HeadersInit, isFormData = false): Header
 // 401이 그대로 던져진다 — `PasswordUpdateFormClient`처럼 `isSessionInvalidErrorCode(error.code)`로
 // 감지해 `/login?error=session_expired`로 보내는 컴포넌트 레벨 fallback은 계속 필요하다(예:
 // refresh_token 자체가 이미 없거나 만료된 경우).
-function finalizeResponse<T>(
-  response: Response,
-  body: ApiResponse<T>,
-  sessionRefreshOutcome?: 'unreachable',
-): T {
+function finalizeResponse<T>(response: Response, body: ApiResponse<T>, sessionRefreshOutcome?: 'unreachable'): T {
   if (!response.ok) {
     throw new ApiError(
       body.error?.message ?? `API request failed: ${response.status}`,
@@ -270,7 +288,12 @@ function finalizeResponse<T>(
   }
 
   if (!body.success) {
-    throw new ApiError(body.error?.message ?? 'API request failed.', response.status, body.error, sessionRefreshOutcome);
+    throw new ApiError(
+      body.error?.message ?? 'API request failed.',
+      response.status,
+      body.error,
+      sessionRefreshOutcome,
+    );
   }
 
   return body.data;
@@ -281,9 +304,7 @@ function finalizeResponse<T>(
 // 경우다 — 호출부가 "무효 토큰이니 쿠키를 지워도 된다"와 "일시 장애라 쿠키는 그대로 둬야 한다"를
 // 구분하려면 이 둘을 뭉뚱그리면 안 된다.
 export type RefreshSessionOutcome =
-  | { status: 'success'; cookies: string[] }
-  | { status: 'rejected' }
-  | { status: 'unreachable' };
+  { status: 'success'; cookies: string[] } | { status: 'rejected' } | { status: 'unreachable' };
 
 /**
  * Access Token 쿠키가 만료(브라우저가 자동 삭제)된 상태에서 Refresh Token으로 세션을 갱신한다.
@@ -348,7 +369,6 @@ async function readApiResponse<T>(response: Response): Promise<ApiResponse<T>> {
   } catch {
     return {
       success: false,
-      data: undefined as T,
       error: {
         code: 'INVALID_RESPONSE',
         message: 'API response is not valid JSON.',

@@ -7,6 +7,7 @@ import { parsePageParam } from '../../../lib/pageParam';
 import { resolveErrorMessage } from '../../../lib/resolveErrorMessage';
 import { getAdminPropertyReports } from '../../../services/admin';
 import { type AdminPropertyReportListItemDto, type PageResponseDto } from '../../../types/api';
+import { useAdminCurrentUser } from '../AdminCurrentUserContext';
 import { AdminReportsClient } from './AdminReportsClient';
 
 // status 쿼리파라미터가 아예 없는 최초 진입(북마크/새로고침 포함)은 대기중(RECEIVED) 신고를
@@ -15,8 +16,16 @@ import { AdminReportsClient } from './AdminReportsClient';
 function AdminReportsPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  // AdminLayout이 role 게이트 과정에서 이미 확인해둔 본인 정보를 재사용한다(users/page.tsx와 동일한
+  // 이유) - AdminReportsClient가 본인이 신고한 건을 처리 대상에서 제외하는 데 필요하다.
+  const { userId: currentUserId } = useAdminCurrentUser();
   const page = parsePageParam(searchParams.get('page') ?? undefined);
-  const selectedStatus = searchParams.get('status') ?? 'RECEIVED';
+  // ??는 null/undefined일 때만 대체하고 빈 문자열은 그대로 통과시킨다 - 오래된 북마크나 수동으로
+  // 편집한 링크에 명시적으로 빈 status 파라미터(?status=)가 붙어 오면 selectedStatus가 ''가 되고,
+  // ''는 'ALL'이 아니므로 apiStatus도 ''가 되어 services/admin.ts의 toQueryString이 빈 문자열
+  // 파라미터를 드롭해 필터 없이(전체) 조회되는데, 드롭다운엔 '' 값 옵션이 없어 선택 상태가
+  // 어긋나 보인다. ||를 쓰면 빈 문자열도 null/undefined와 동일하게 기본값으로 대체된다.
+  const selectedStatus = searchParams.get('status') || 'RECEIVED';
   const apiStatus = selectedStatus === 'ALL' ? undefined : selectedStatus;
   const reason = searchParams.get('reason') ?? undefined;
 
@@ -53,25 +62,38 @@ function AdminReportsPageContent() {
   // 뒤에만 state를 쓴다. useEffect의 cancelled 플래그는 loading만 지켜줄 뿐 이 함수 내부 쓰기는
   // 못 막는다(onMutated로 effect 밖에서도 호출되므로 더더욱 그렇다).
   const requestIdRef = useRef(0);
-  const reloadReports = useCallback(() => {
-    const requestId = ++requestIdRef.current;
-    return getAdminPropertyReports({ page, status: apiStatus, reason })
-      .then((result) => {
-        if (requestId !== requestIdRef.current) return;
-        // 지금 페이지가 이 결과 기준으로 더 이상 유효하지 않으면, 빈 목록을 잠깐 보여주는 대신
-        // 유효한 페이지로 리다이렉트한다(그 리다이렉트가 URL을 바꿔 이 effect를 다시 실행시킨다).
-        if (clampToValidPage(result.totalPages)) return;
-        setData(result);
-        setLoadError(undefined);
-      })
-      .catch((error) => {
-        if (requestId !== requestIdRef.current) return;
-        // data를 그대로 두면 에러 배너 아래 이전(어쩌면 다른 필터의) 목록이 최신인 것처럼 계속
-        // 보인다 - 실패했으면 화면에는 에러만 남긴다.
-        setData(undefined);
-        setLoadError(resolveErrorMessage(error, '신고 목록을 불러오지 못했습니다.'));
-      });
-  }, [page, apiStatus, reason, clampToValidPage]);
+  const reloadReports = useCallback(
+    (options?: { keepDataOnError?: boolean }) => {
+      const requestId = ++requestIdRef.current;
+      return getAdminPropertyReports({ page, status: apiStatus, reason })
+        .then((result) => {
+          if (requestId !== requestIdRef.current) return;
+          // 지금 페이지가 이 결과 기준으로 더 이상 유효하지 않으면, 빈 목록을 잠깐 보여주는 대신
+          // 유효한 페이지로 리다이렉트한다(그 리다이렉트가 URL을 바꿔 이 effect를 다시 실행시킨다).
+          if (clampToValidPage(result.totalPages)) return;
+          setData(result);
+          setLoadError(undefined);
+        })
+        .catch((error) => {
+          if (requestId !== requestIdRef.current) return;
+          const message = resolveErrorMessage(error, '신고 목록을 불러오지 못했습니다.');
+          if (options?.keepDataOnError) {
+            // 신고 검토가 서버에서는 이미 성공한 뒤, 그 후속 목록 재조회만 일시적으로 실패한
+            // 경우다 - 목록을 지우면 방금 확정한 처리 자체가 실패한 것처럼 보인다. 기존 목록은
+            // 그대로 두고 경고만 남긴다(AdminReportsClient가 data/loadError를 독립적으로
+            // 렌더링하므로 목록과 경고가 함께 보인다).
+            setLoadError(message);
+            return;
+          }
+          // 필터/페이지 변경으로 인한 재조회 실패다 - data를 그대로 두면 에러 배너 아래 이전
+          // (어쩌면 다른 필터의) 목록이 최신인 것처럼 계속 보인다. 실패했으면 화면에는 에러만
+          // 남긴다.
+          setData(undefined);
+          setLoadError(message);
+        });
+    },
+    [page, apiStatus, reason, clampToValidPage],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -87,6 +109,8 @@ function AdminReportsPageContent() {
     };
   }, [reloadReports]);
 
+  const reloadReportsAfterMutation = useCallback(() => reloadReports({ keepDataOnError: true }), [reloadReports]);
+
   if (loading) {
     return (
       <div className="flex min-h-[30vh] items-center justify-center">
@@ -100,7 +124,8 @@ function AdminReportsPageContent() {
       data={data}
       loadError={loadError}
       filters={{ status: selectedStatus, reason: reason ?? '' }}
-      onMutated={reloadReports}
+      currentUserId={currentUserId}
+      onMutated={reloadReportsAfterMutation}
     />
   );
 }

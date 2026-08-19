@@ -20,11 +20,14 @@ export function PropertyEditClient({ propertyId, property, loadError }: Property
   const router = useRouter();
 
   const [title, setTitle] = useState(property?.title ?? '');
+  // 보증금/월세는 화면에서 만원 단위로 다루므로, BE가 내려준 원 단위 값을 만원으로 나눠서 프리필한다(#175).
+  // 이 기능 이전에 등록된 매물은 만원 단위로 딱 안 떨어질 수도 있어 반올림한다 - 이후 수정 저장 시
+  // 반올림된 만원 값이 그대로 원 단위로 환산되어 저장되므로, 그 경우 소수점 이하 원 단위는 사라진다.
   const [deposit, setDeposit] = useState(
-    property?.depositAmount !== undefined ? formatIntegerInput(String(property.depositAmount)) : '',
+    property?.depositAmount !== undefined ? formatIntegerInput(String(Math.round(property.depositAmount / 10_000))) : '',
   );
   const [monthlyRent, setMonthlyRent] = useState(
-    property?.monthlyRentAmount ? formatIntegerInput(String(property.monthlyRentAmount)) : '',
+    property?.monthlyRentAmount ? formatIntegerInput(String(Math.round(property.monthlyRentAmount / 10_000))) : '',
   );
   const [area, setArea] = useState(property?.area !== undefined ? formatDecimalInput(String(property.area)) : '');
   // 관리비 0(관리비 없음으로 명시)과 null(입력 안 함)을 구분해야 하므로 falsy 체크(?)가 아니라
@@ -56,14 +59,12 @@ export function PropertyEditClient({ propertyId, property, loadError }: Property
   async function handleSubmit() {
     setError(null);
 
-    const depositNumber = Number(deposit.replace(/,/g, ''));
+    // 보증금/월세는 화면에서 만원 단위로 입력받고, BE에는 원 단위로 변환해서 보낸다(#175).
+    const depositManwon = Number(deposit.replace(/,/g, ''));
+    const depositNumber = depositManwon * 10_000;
     const areaNumber = Number(area.replace(/,/g, ''));
 
-    if (title.trim().length === 0) {
-      setError('매물 이름을 입력해주세요.');
-      return;
-    }
-    if (!deposit || Number.isNaN(depositNumber) || depositNumber <= 0) {
+    if (!deposit || Number.isNaN(depositManwon) || depositManwon <= 0) {
       setError('보증금을 올바르게 입력해주세요.');
       return;
     }
@@ -74,8 +75,9 @@ export function PropertyEditClient({ propertyId, property, loadError }: Property
 
     let monthlyRentNumber: number | null = null;
     if (isMonthlyRent) {
-      monthlyRentNumber = Number(monthlyRent.replace(/,/g, ''));
-      if (!monthlyRent || Number.isNaN(monthlyRentNumber) || monthlyRentNumber <= 0) {
+      const monthlyRentManwon = Number(monthlyRent.replace(/,/g, ''));
+      monthlyRentNumber = monthlyRentManwon * 10_000;
+      if (!monthlyRent || Number.isNaN(monthlyRentManwon) || monthlyRentManwon <= 0) {
         setError('월세를 올바르게 입력해주세요.');
         return;
       }
@@ -144,7 +146,7 @@ export function PropertyEditClient({ propertyId, property, loadError }: Property
 
           <div className="space-y-5">
             <label className="block">
-              <span className="mb-2 block text-sm font-bold text-slate-700">매물 이름</span>
+              <span className="mb-2 block text-sm font-bold text-slate-700">매물 이름 (선택)</span>
               <input
                 value={title}
                 onChange={(event) => setTitle(event.target.value)}
@@ -152,30 +154,33 @@ export function PropertyEditClient({ propertyId, property, loadError }: Property
                 className="ansim-input disabled:opacity-60"
                 placeholder="예: 강남 오피스텔"
               />
+              <p className="mt-2 text-xs text-slate-500">
+                이름이 없는 건물이라면 비워두세요. &ldquo;{property.propertyType}&rdquo;로 표시돼요.
+              </p>
             </label>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <label className="block">
-                <span className="mb-2 block text-sm font-bold text-slate-700">보증금 (원)</span>
+                <span className="mb-2 block text-sm font-bold text-slate-700">보증금 (만원)</span>
                 <input
                   value={deposit}
                   onChange={(event) => setDeposit(formatIntegerInput(event.target.value))}
                   inputMode="numeric"
                   disabled={isSubmitting}
                   className="ansim-input disabled:opacity-60"
-                  placeholder="예: 180,000,000"
+                  placeholder="예: 18,000 (1억 8천만원)"
                 />
               </label>
               {isMonthlyRent && (
                 <label className="block">
-                  <span className="mb-2 block text-sm font-bold text-slate-700">월세 (원)</span>
+                  <span className="mb-2 block text-sm font-bold text-slate-700">월세 (만원)</span>
                   <input
                     value={monthlyRent}
                     onChange={(event) => setMonthlyRent(formatIntegerInput(event.target.value))}
                     inputMode="numeric"
                     disabled={isSubmitting}
                     className="ansim-input disabled:opacity-60"
-                    placeholder="예: 550,000"
+                    placeholder="예: 55 (55만원)"
                   />
                 </label>
               )}

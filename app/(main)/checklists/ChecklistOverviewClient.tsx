@@ -17,6 +17,12 @@ const statusColorMap: Record<ChecklistOverview['status'], string> = {
   COMPLETED: 'bg-emerald-50 text-emerald-700',
 };
 
+// 완료 상태는 배지와 동일하게 emerald 톤을 써서 진행률 박스도 상태 색상과 맞춘다.
+const progressAccentColorMap: Partial<Record<ChecklistOverview['status'], { text: string; bar: string }>> = {
+  IN_PROGRESS: { text: 'text-teal-600', bar: 'bg-teal-500' },
+  COMPLETED: { text: 'text-emerald-600', bar: 'bg-emerald-500' },
+};
+
 type ChecklistOverviewClientProps = {
   checklistPage: ChecklistOverviewPage;
   loadError?: string;
@@ -65,9 +71,25 @@ export function ChecklistOverviewClient({ checklistPage, loadError }: ChecklistO
               <h2 className="mb-1 text-lg font-bold text-slate-950 group-hover:text-teal-700">
                 {overview.propertyTitle}
               </h2>
-              <p className="flex items-center gap-1 text-sm text-slate-500">
+              <p className="mb-3 flex items-center gap-1 text-sm text-slate-500">
                 <MapPin className="h-4 w-4" /> {overview.address}
               </p>
+              {overview.progressPercent !== undefined && progressAccentColorMap[overview.status] && (
+                <div className="rounded-xl bg-slate-50 p-3">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <span className="text-xs text-slate-400">체크리스트 진행률</span>
+                    <span className={`text-sm font-bold ${progressAccentColorMap[overview.status]!.text}`}>
+                      {overview.progressPercent}% 확인, 주의 {overview.cautionCount ?? 0}개
+                    </span>
+                  </div>
+                  <div className="h-2 w-full rounded-full bg-slate-200">
+                    <div
+                      className={`h-full rounded-full ${progressAccentColorMap[overview.status]!.bar}`}
+                      style={{ width: `${overview.progressPercent}%` }}
+                    />
+                  </div>
+                </div>
+              )}
             </Link>
           ))}
         </div>

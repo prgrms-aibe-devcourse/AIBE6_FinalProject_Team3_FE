@@ -11,6 +11,7 @@ import {
 } from '../repositories/userRepository';
 import {
   type NicknameCheckResponseDto,
+  type NicknamePolicyDto,
   type ProfileImageConfirmRequestDto,
   type ProfileImagePresignRequestDto,
   type ProfileImagePresignResponseDto,
@@ -111,6 +112,18 @@ async function putFileToPresignedUrl(uploadUrl: string, file: File, tagging: str
   if (!response.ok) {
     throw new ApiError(UPLOAD_FAILED_MESSAGE, response.status);
   }
+}
+
+// logout()과 마찬가지로 목데이터 분기를 두지 않는다 - 실제 계정 삭제/익명화가 필요한 동작이라
+// 목데이터로 의미 있게 흉내낼 대상이 없다.
+export async function withdraw(): Promise<void> {
+  await requestJson<void>('/users/me', { method: 'DELETE' });
+}
+
+// PasswordPolicy(getPasswordPolicy)와 같은 이유로 목데이터 분기를 두지 않는다 - 이 값은 사용자별
+// 데이터가 아니라 서버가 정한 고정 정책이라, 프론트가 하드코딩해두는 대신 항상 이 응답을 그대로 쓴다.
+export async function getNicknamePolicy(): Promise<NicknamePolicyDto> {
+  return requestJson<NicknamePolicyDto>('/users/nickname-policy');
 }
 
 export async function checkNicknameAvailability(nickname: string): Promise<boolean> {

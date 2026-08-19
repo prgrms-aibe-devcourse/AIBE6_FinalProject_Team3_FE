@@ -19,7 +19,7 @@ export default function AdminChecklistsPage() {
   // requestIdRef: onMutated로 effect 밖에서도 호출되므로, 응답이 왔을 때 그게 여전히 최신 호출인지
   // 확인한 뒤에만 state를 쓴다.
   const requestIdRef = useRef(0);
-  const reloadTemplates = useCallback(() => {
+  const reloadTemplates = useCallback((options?: { keepDataOnError?: boolean }) => {
     const requestId = ++requestIdRef.current;
     return getAdminChecklistItemTemplates()
       .then((result) => {
@@ -29,10 +29,19 @@ export default function AdminChecklistsPage() {
       })
       .catch((error) => {
         if (requestId !== requestIdRef.current) return;
+        const message = resolveErrorMessage(error, '체크리스트 문항을 불러오지 못했습니다.');
+        if (options?.keepDataOnError) {
+          // 문항 생성/수정/삭제가 서버에서는 이미 성공한 뒤, 그 후속 목록 재조회만 일시적으로
+          // 실패한 경우다 - 목록을 지우면 방금 확정한 변경 자체가 실패한 것처럼 보인다. 기존
+          // 목록은 그대로 두고 경고만 남긴다(AdminChecklistTemplatesClient가 data/loadError를
+          // 독립적으로 렌더링하므로 목록과 경고가 함께 보인다).
+          setLoadError(message);
+          return;
+        }
         // data를 그대로 두면 에러 배너 아래 이전 목록이 최신인 것처럼 계속 보인다 - 실패했으면
         // 화면에는 에러만 남긴다.
         setData(undefined);
-        setLoadError(resolveErrorMessage(error, '체크리스트 문항을 불러오지 못했습니다.'));
+        setLoadError(message);
       });
   }, []);
 
@@ -49,6 +58,11 @@ export default function AdminChecklistsPage() {
     };
   }, [reloadTemplates]);
 
+  const reloadTemplatesAfterMutation = useCallback(
+    () => reloadTemplates({ keepDataOnError: true }),
+    [reloadTemplates],
+  );
+
   if (loading) {
     return (
       <div className="flex min-h-[30vh] items-center justify-center">
@@ -57,5 +71,7 @@ export default function AdminChecklistsPage() {
     );
   }
 
-  return <AdminChecklistTemplatesClient data={data} loadError={loadError} onMutated={reloadTemplates} />;
+  return (
+    <AdminChecklistTemplatesClient data={data} loadError={loadError} onMutated={reloadTemplatesAfterMutation} />
+  );
 }

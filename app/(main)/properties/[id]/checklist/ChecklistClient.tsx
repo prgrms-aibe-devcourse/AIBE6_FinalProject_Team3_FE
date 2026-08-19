@@ -14,6 +14,7 @@ import { type Checklist, type ChecklistItem, type PropertyDetail } from '../../.
 import { Badge } from '../../../../ui/Badge';
 import { Modal } from '../../../../ui/Modal';
 import { NoticeBox } from '../../../../ui/NoticeBox';
+import { ChecklistItemImages } from './ChecklistItemImages';
 
 const EMPTY_SUMMARY: ChecklistSummary = {
   progressPercent: 0,
@@ -52,11 +53,32 @@ export function ChecklistClient({ propertyId, checklist, initialSummary, loadErr
   const [itemErrors, setItemErrors] = useState<Record<number, string>>({});
   const [helperItemId, setHelperItemId] = useState<number | null>(null);
   const [isCompleteModalOpen, setIsCompleteModalOpen] = useState(false);
+  const [highlightItemId, setHighlightItemId] = useState<number | null>(null);
   const openHelperRef = useRef<HTMLSpanElement | null>(null);
+  const itemRefs = useRef<Record<number, HTMLDivElement | null>>({});
 
   const checklistId = checklist?.id;
   const activeItems = items.filter((item) => item.category === activeCategory);
   const uncheckedCount = items.filter((item) => !item.checked).length;
+  const missingRequiredItems = items.filter((item) => item.importance === 'required' && !item.checked);
+
+  useEffect(() => {
+    if (highlightItemId === null) {
+      return;
+    }
+    itemRefs.current[highlightItemId]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const timer = setTimeout(() => setHighlightItemId(null), 2000);
+    return () => clearTimeout(timer);
+  }, [highlightItemId, activeCategory]);
+
+  const handleJumpToMissingRequired = () => {
+    const target = missingRequiredItems[0];
+    if (!target) {
+      return;
+    }
+    setActiveCategory(target.category);
+    setHighlightItemId(target.id);
+  };
 
   useEffect(() => {
     if (helperItemId === null) {
@@ -158,9 +180,13 @@ export function ChecklistClient({ propertyId, checklist, initialSummary, loadErr
       <div className="sticky top-0 z-30 border-b border-slate-200 bg-white">
         <div className="container mx-auto flex h-16 max-w-3xl items-center justify-between px-4">
           <div className="flex items-center gap-3">
-            <Link href={`/properties/${propertyId}`} className="-ml-2 p-2 text-slate-500 hover:text-slate-950">
+            <button
+              type="button"
+              onClick={() => router.back()}
+              className="-ml-2 p-2 text-slate-500 hover:text-slate-950"
+            >
               <ArrowLeft className="h-6 w-6" />
-            </Link>
+            </button>
             <div>
               <h1 className="text-lg font-bold text-slate-950">현장 체크리스트</h1>
               {property && (
@@ -196,9 +222,21 @@ export function ChecklistClient({ propertyId, checklist, initialSummary, loadErr
             </div>
           </div>
           <p className="mt-3 text-center text-xs text-slate-500">
-            {summary.hasStarted
-              ? `필수 확인 누락 ${summary.missingRequiredCount}개`
-              : (summary.message ?? '체크리스트를 시작해보세요')}
+            {summary.hasStarted ? (
+              missingRequiredItems.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={handleJumpToMissingRequired}
+                  className="font-bold text-slate-600 underline decoration-dotted underline-offset-2 hover:text-slate-900"
+                >
+                  필수 확인 누락 {missingRequiredItems.length}개
+                </button>
+              ) : (
+                `필수 확인 누락 ${missingRequiredItems.length}개`
+              )
+            ) : (
+              (summary.message ?? '체크리스트를 시작해보세요')
+            )}
           </p>
         </div>
 
@@ -222,9 +260,13 @@ export function ChecklistClient({ propertyId, checklist, initialSummary, loadErr
           {activeItems.map((item) => (
             <div
               key={item.id}
+              ref={(el) => {
+                itemRefs.current[item.id] = el;
+              }}
               className={cn(
-                'ansim-card overflow-visible bg-white p-4',
+                'ansim-card overflow-visible bg-white p-4 transition',
                 item.issueFound && 'border-orange-200 bg-orange-50/40',
+                highlightItemId === item.id && 'ring-2 ring-orange-400',
               )}
             >
               <div className="mb-1 flex items-start gap-2">
@@ -257,6 +299,8 @@ export function ChecklistClient({ propertyId, checklist, initialSummary, loadErr
                 </p>
               </div>
               {item.guideText && <p className="mb-3 text-xs text-slate-500">{item.guideText}</p>}
+
+              <ChecklistItemImages images={item.images} />
 
               {item.itemType === 'check' && (
                 <div className="space-y-2">
@@ -350,6 +394,27 @@ export function ChecklistClient({ propertyId, checklist, initialSummary, loadErr
                 </div>
               )}
 
+              {item.itemType === 'multipleChoice' && (
+                <div className="flex gap-2">
+                  {item.options.map((option) => (
+                    <button
+                      key={option}
+                      onClick={() => handleAnswer(item, option)}
+                      className={cn(
+                        'flex-1 whitespace-nowrap rounded-lg border px-3 py-2 text-sm font-bold transition',
+                        item.value === option
+                          ? option === '미흡'
+                            ? 'border-orange-200 bg-orange-50 text-orange-700'
+                            : 'border-teal-200 bg-teal-50 text-teal-700'
+                          : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50',
+                      )}
+                    >
+                      {option}
+                    </button>
+                  ))}
+                </div>
+              )}
+
               {itemErrors[item.id] && <p className="mt-2 text-xs text-red-600">{itemErrors[item.id]}</p>}
             </div>
           ))}
@@ -372,7 +437,7 @@ export function ChecklistClient({ propertyId, checklist, initialSummary, loadErr
           </button>
 
           <Link
-            href="/contract/upload"
+            href={`/contract/upload?propertyId=${propertyId}`}
             className="ansim-button-secondary flex flex-1 items-center justify-center gap-2 px-5 py-3"
           >
             특약사항도 AI로 분석해보세요 <ArrowRight className="h-4 w-4" />

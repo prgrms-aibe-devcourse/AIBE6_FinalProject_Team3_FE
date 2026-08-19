@@ -13,6 +13,7 @@ import { formatDecimalInput, formatIntegerInput } from '../../../lib/numberForma
 import { createProperty } from '../../../services/properties';
 import { type PropertyTransactionTypeDto, type PropertyTypeDto } from '../../../types/api';
 import { type PropertyImage } from '../../../types/domain';
+import { AddressSearchField } from '../../../ui/AddressSearchField';
 import { FeatureCard } from '../../../ui/FeatureCard';
 import { LoadingOverlay } from '../../../ui/LoadingOverlay';
 import { PropertyImageUploader } from '../../../ui/PropertyImageUploader';
@@ -38,18 +39,17 @@ export default function Page() {
   async function handleSubmit() {
     setError(null);
 
-    const depositNumber = Number(deposit.replace(/,/g, ''));
+    // 보증금/월세는 화면에서 만원 단위로 입력받고, BE에는 원 단위로 변환해서 보낸다(#175) -
+    // "180,000,000"처럼 원 단위 그대로 입력하게 하면 자릿수를 세다가 실수하기 쉽다는 피드백 반영.
+    const depositManwon = Number(deposit.replace(/,/g, ''));
+    const depositNumber = depositManwon * 10_000;
     const areaNumber = Number(area.replace(/,/g, ''));
 
-    if (title.trim().length === 0) {
-      setError('매물 이름을 입력해주세요.');
-      return;
-    }
     if (address.trim().length === 0) {
       setError('주소를 입력해주세요.');
       return;
     }
-    if (!deposit || Number.isNaN(depositNumber) || depositNumber <= 0) {
+    if (!deposit || Number.isNaN(depositManwon) || depositManwon <= 0) {
       setError('보증금을 올바르게 입력해주세요.');
       return;
     }
@@ -60,8 +60,9 @@ export default function Page() {
 
     let monthlyRentNumber: number | null = null;
     if (isMonthlyRent) {
-      monthlyRentNumber = Number(monthlyRent.replace(/,/g, ''));
-      if (!monthlyRent || Number.isNaN(monthlyRentNumber) || monthlyRentNumber <= 0) {
+      const monthlyRentManwon = Number(monthlyRent.replace(/,/g, ''));
+      monthlyRentNumber = monthlyRentManwon * 10_000;
+      if (!monthlyRent || Number.isNaN(monthlyRentManwon) || monthlyRentManwon <= 0) {
         setError('월세를 올바르게 입력해주세요.');
         return;
       }
@@ -123,7 +124,7 @@ export default function Page() {
 
           <div className="space-y-5">
             <label className="block">
-              <span className="mb-2 block text-sm font-bold text-slate-700">매물 이름</span>
+              <span className="mb-2 block text-sm font-bold text-slate-700">매물 이름 (선택)</span>
               <input
                 value={title}
                 onChange={(event) => setTitle(event.target.value)}
@@ -131,18 +132,17 @@ export default function Page() {
                 className="ansim-input disabled:opacity-60"
                 placeholder="예: 강남 오피스텔"
               />
+              <p className="mt-2 text-xs text-slate-500">
+                이름이 없는 건물이라면 비워두세요. &ldquo;
+                {propertyTypeOptions.find((option) => option.value === propertyType)?.label}
+                &rdquo;로 표시돼요.
+              </p>
             </label>
 
-            <label className="block">
+            <div>
               <span className="mb-2 block text-sm font-bold text-slate-700">주소</span>
-              <input
-                value={address}
-                onChange={(event) => setAddress(event.target.value)}
-                disabled={isSubmitting}
-                className="ansim-input disabled:opacity-60"
-                placeholder="예: 서울시 강남구 테헤란로 123"
-              />
-            </label>
+              <AddressSearchField value={address} onChange={setAddress} disabled={isSubmitting} />
+            </div>
 
             <div>
               <span className="mb-2 block text-sm font-bold text-slate-700">매물 유형</span>
@@ -193,26 +193,26 @@ export default function Page() {
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <label className="block">
-                <span className="mb-2 block text-sm font-bold text-slate-700">보증금 (원)</span>
+                <span className="mb-2 block text-sm font-bold text-slate-700">보증금 (만원)</span>
                 <input
                   value={deposit}
                   onChange={(event) => setDeposit(formatIntegerInput(event.target.value))}
                   inputMode="numeric"
                   disabled={isSubmitting}
                   className="ansim-input disabled:opacity-60"
-                  placeholder="예: 180,000,000"
+                  placeholder="예: 18,000 (1억 8천만원)"
                 />
               </label>
               {isMonthlyRent && (
                 <label className="block">
-                  <span className="mb-2 block text-sm font-bold text-slate-700">월세 (원)</span>
+                  <span className="mb-2 block text-sm font-bold text-slate-700">월세 (만원)</span>
                   <input
                     value={monthlyRent}
                     onChange={(event) => setMonthlyRent(formatIntegerInput(event.target.value))}
                     inputMode="numeric"
                     disabled={isSubmitting}
                     className="ansim-input disabled:opacity-60"
-                    placeholder="예: 550,000"
+                    placeholder="예: 55 (55만원)"
                   />
                 </label>
               )}

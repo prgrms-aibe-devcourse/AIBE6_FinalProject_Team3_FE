@@ -37,6 +37,8 @@ export type PropertySummary = {
   checklist?: number;
   statusColor: string;
   location: PropertyLocation;
+  // 매물에 이미지가 한 장도 없으면 undefined.
+  representativeImageUrl?: string;
 };
 
 /**
@@ -107,6 +109,10 @@ export type PropertyMarketComparison = {
   referenceDate?: string;
   // 실제 적용된 반경 단계(300 또는 600) - 반경이 확장됐는지 사용자에게 알려주기 위함.
   radiusMeters?: number;
+  // 표본 필터링에 쓰인 면적오차 허용율(0.2 = ±20%).
+  areaErrorRate?: number;
+  // 실거래를 조회한 개월 수.
+  lookbackMonths?: number;
   // UNAVAILABLE일 때 사유(월세/단독다가구/좌표없음/표본부족 등)를 그대로 보여준다.
   message?: string;
 };
@@ -127,7 +133,7 @@ export type ChecklistCategory = {
   icon: LucideIcon;
 };
 
-export type ChecklistItemType = 'check' | 'yesNo' | 'date' | 'documentRequest';
+export type ChecklistItemType = 'check' | 'yesNo' | 'date' | 'documentRequest' | 'multipleChoice';
 export type ChecklistImportance = 'required' | 'general';
 
 export type ChecklistItem = {
@@ -144,6 +150,10 @@ export type ChecklistItem = {
   issueFound: boolean;
   value: string | null;
   userNote: string | null;
+  // 문항 템플릿에 딸린 참고 이미지 URL 목록(관리자 등록, AI 생성 예시). 대부분 빈 배열.
+  images: string[];
+  // multipleChoice 타입 문항의 선택지 목록(예: ["가스보일러", "기름보일러", ...]). 그 외 타입은 빈 배열.
+  options: string[];
 };
 
 // Backend의 status(NOT_STARTED/IN_PROGRESS/COMPLETED)는 FE가 items로부터 직접 계산하는
@@ -166,6 +176,9 @@ export type ChecklistOverview = {
   // 표시용으로 이미 포맷된 문자열("2026.07.30"). 체크리스트가 있으면 마지막 항목 수정 시각,
   // 시작 전이면 매물 등록/수정 시각으로 Backend가 대체해서 내려준다(항상 값이 있음).
   lastCheckedAt: string;
+  // 시작 전이면 undefined(0%와 구분) - ChecklistProgress와 동일한 패턴.
+  progressPercent?: number;
+  cautionCount?: number;
 };
 
 // GET /checklists 페이지네이션 응답. Backend PageResponse를 그대로 옮기되 content만
@@ -192,7 +205,9 @@ export type ChecklistProgress = {
 };
 
 export type ContractClause = {
-  originalText: string;
+  // 마이페이지 계약분석 이력 상세(ContractHistoryClauseDto)는 원문을 저장하지 않는 정책이라 이
+  // 필드가 없다 - 그 경로에서 매핑된 조항은 항상 undefined, 그 외(analyzeContract 응답)엔 항상 값 있음.
+  originalText?: string;
   riskFlag: boolean;
   explanation: string;
   question: string;
@@ -223,9 +238,26 @@ export type ContractTab = {
   label: string;
 };
 
-export type ContractMissingItem = {
-  title: string;
-  description: string;
+// 마이페이지 "계약분석 이력" 섹션용. 목록 표시에만 쓰여 propertyId/status는 옮기지 않는다(status는
+// Backend에 "COMPLETED" 한 종류뿐이라 분기할 값 자체가 없음) - 원문을 저장하지 않는 정책이라
+// 클릭해도 상세로 갈 곳이 없어 id도 렌더링용이 아니라 목록 key로만 쓰인다.
+export type ContractHistoryItem = {
+  id: number;
+  inputType: 'TEXT' | 'IMAGE';
+  summary: string;
+  clauseCount: number;
+  riskCount: number;
+  // 표시용으로 이미 포맷된 문자열("2026.08.19") - mappers/property.ts의 formatDateText 재사용.
+  createdAt: string;
+};
+
+export type ContractHistoryPage = {
+  items: ContractHistoryItem[];
+  page: number;
+  size: number;
+  totalElements: number;
+  totalPages: number;
+  hasNext: boolean;
 };
 
 export type QuickActionTone = 'teal' | 'orange' | 'emerald' | 'blue';
@@ -244,8 +276,13 @@ export type FeatureCardData = {
   description: string;
 };
 
+// 랜딩페이지에서 비회원도 카드를 눌러 실제 결과 화면과 비슷한 정적 예시 페이지(/preview/[key],
+// frontend/app/preview/[key] 참고)로 이동할 수 있게 한다 - demoKey로 어떤 예시를 보여줄지 연결한다.
+export type LandingDemoKey = 'market' | 'contract' | 'deposit' | 'checklist';
+
 export type TonedFeatureCardData = FeatureCardData & {
   tone: string;
+  demoKey: LandingDemoKey;
 };
 
 export type SummaryItem = readonly [label: string, value: string];
@@ -299,6 +336,9 @@ export type PriorityAction = {
   description: string;
   ctaLabel: string;
   ctaHref: string;
+  // 조회 실패 후 "새로고침" 안내처럼 현재 페이지 자신으로 이동해봐야 아무 효과가 없는 경우를 위한
+  // 재시도 콜백 - 있으면 ctaHref로의 이동 대신 이 콜백을 호출한다(PriorityActionCard 참고).
+  onCtaClick?: () => void;
 };
 
 // --- risk-analysis 도메인 ---
@@ -329,10 +369,20 @@ export type DepositSafetyCheck = {
   propertyId: number;
   status: DepositSafetyStatusId;
   jeonseRatio: number | null;
+  // 선순위보증금 반영 정밀 재계산이 적용된 결과인지, 적용됐다면 실제로 반영된 값이 얼마인지.
+  // 재계산 폼을 새로고침 후에도 "이미 반영된 값"으로 다시 채워주기 위해 필요하다.
+  seniorDepositApplied: boolean;
+  seniorDeposit: number | null;
+  maxClaimAmount: number | null;
   explanation: string | null;
   referenceDate: string | null;
+  sampleCount: number | null;
+  radiusMeters: number | null;
   reasonText: string | null;
   calculatedAt: string | null;
   disclaimer: string;
   recentOwnershipChangeWarning: boolean;
+  cautionFrom: number | null;
+  warnFrom: number | null;
+  warnTo: number | null;
 };

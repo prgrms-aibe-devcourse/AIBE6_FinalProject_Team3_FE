@@ -139,6 +139,7 @@ export function mapPropertyListItemDto(dto: PropertyListItemDto): PropertySummar
         : undefined,
     statusColor: propertyStatusColorMap.slate,
     location: { latitude: 0, longitude: 0 },
+    representativeImageUrl: dto.representativeImageUrl ?? undefined,
   };
 }
 
@@ -172,6 +173,8 @@ function mapMarketComparisonDto(dto: MarketComparisonDto): PropertyMarketCompari
     sampleCount: dto.sampleCount ?? undefined,
     referenceDate: dto.referenceDate ? formatDateText(dto.referenceDate) : undefined,
     radiusMeters: dto.radiusMeters ?? undefined,
+    areaErrorRate: dto.areaErrorRate ?? undefined,
+    lookbackMonths: dto.lookbackMonths ?? undefined,
     message: dto.message ?? undefined,
   };
 }
@@ -234,6 +237,8 @@ export function mapPropertySummaryToMockDetail(property: PropertySummary): Prope
       sampleCount: 5,
       referenceDate: '2026.06.20',
       radiusMeters: 300,
+      areaErrorRate: 0.2,
+      lookbackMonths: 6,
     },
   };
 }

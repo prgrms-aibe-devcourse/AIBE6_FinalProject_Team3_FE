@@ -9,10 +9,14 @@ import { getMyChecklistOverviews } from '../../services/checklist';
 import { type ChecklistOverviewPage } from '../../types/domain';
 import { ChecklistOverviewClient } from './ChecklistOverviewClient';
 
+// BE 기본값(20)과 별개로, 목록 화면 UI상 한 페이지에 보여줄 카드 개수는 FE가 정한다
+// (properties/page.tsx의 PAGE_SIZE와 동일 패턴).
+const PAGE_SIZE = 5;
+
 const emptyPage: ChecklistOverviewPage = {
   items: [],
   page: 0,
-  size: 20,
+  size: PAGE_SIZE,
   totalElements: 0,
   totalPages: 0,
   hasNext: false,
@@ -33,7 +37,7 @@ function ChecklistsPageContent() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
 
-    getMyChecklistOverviews({ page })
+    getMyChecklistOverviews({ page, size: PAGE_SIZE })
       .then((result) => {
         if (!cancelled) {
           setChecklistPage(result);

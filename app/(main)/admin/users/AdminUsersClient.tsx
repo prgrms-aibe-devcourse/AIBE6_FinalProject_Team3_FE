@@ -4,8 +4,9 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Search } from 'lucide-react';
 import { resolveErrorMessage } from '../../../lib/resolveErrorMessage';
-import { updateAdminUserRole, updateAdminUserStatus } from '../../../services/adminActions';
+import { bulkUpdateAdminUserStatus, updateAdminUserRole, updateAdminUserStatus } from '../../../services/adminActions';
 import {
+  type AdminBulkActionResponseDto,
   type AdminRoleDto,
   type AdminUserListItemDto,
   type AdminUserStatusDto,
@@ -41,9 +42,14 @@ const STATUS_TONE: Record<AdminUserStatusDto, string> = {
   WITHDRAWN: 'bg-slate-100 text-slate-500',
 };
 
-type ActiveAction =
-  | { type: 'role'; user: AdminUserListItemDto }
-  | { type: 'status'; user: AdminUserListItemDto };
+type ActiveAction = { type: 'role'; user: AdminUserListItemDto } | { type: 'status'; user: AdminUserListItemDto };
+type BulkAction = { status: 'ACTIVE' | 'SUSPENDED' };
+
+// 탈퇴 유저와 본인 계정은 단건 액션 버튼도 이미 숨기고 있다(actions 컬럼 render 참고) - 같은 이유로
+// 일괄처리 체크박스 대상에서도 제외한다.
+function isUserBulkSelectable(row: AdminUserListItemDto, currentUserId: number): boolean {
+  return row.status !== 'WITHDRAWN' && row.id !== currentUserId;
+}
 
 export function AdminUsersClient({ data, loadError, filters, currentUserId, onMutated }: AdminUsersClientProps) {
   const router = useRouter();
@@ -54,6 +60,12 @@ export function AdminUsersClient({ data, loadError, filters, currentUserId, onMu
   const [action, setAction] = useState<ActiveAction | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string | undefined>();
+
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [bulkAction, setBulkAction] = useState<BulkAction | null>(null);
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
+  const [bulkError, setBulkError] = useState<string | undefined>();
+  const [bulkResult, setBulkResult] = useState<AdminBulkActionResponseDto | null>(null);
 
   // 검색창 로컬 state는 useState(filters.x)로 최초 1회만 seed되므로, 브라우저 뒤로/앞으로가기로
   // filters props만 바뀌는 경우(page.tsx가 searchParams를 다시 읽어 내려줌)에는 반영되지 않아
@@ -67,6 +79,13 @@ export function AdminUsersClient({ data, loadError, filters, currentUserId, onMu
     setRole(filters.role);
     setStatus(filters.status);
   }, [filters.email, filters.nickname, filters.role, filters.status]);
+
+  // data가 바뀔 때(페이지 이동/검색/일괄처리 후 재조회)마다 선택 상태를 비운다 - 이전 페이지에서
+  // 선택했던 id가 새 목록에 없는 채로 남아있으면 "선택 N명"이 실제 화면과 어긋나 보인다.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSelectedIds(new Set());
+  }, [data]);
 
   function navigate(next: Partial<Filters & { page: number }>) {
     const merged = { email, nickname, role, status, page: 0, ...next };
@@ -117,6 +136,56 @@ export function AdminUsersClient({ data, loadError, filters, currentUserId, onMu
     }
   }
 
+  function toggleSelect(key: string | number) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(key as number)) {
+        next.delete(key as number);
+      } else {
+        next.add(key as number);
+      }
+      return next;
+    });
+  }
+
+  function toggleSelectAll(selectableRows: AdminUserListItemDto[]) {
+    setSelectedIds((prev) => {
+      const allSelected = selectableRows.length > 0 && selectableRows.every((row) => prev.has(row.id));
+      const next = new Set(prev);
+      selectableRows.forEach((row) => {
+        if (allSelected) {
+          next.delete(row.id);
+        } else {
+          next.add(row.id);
+        }
+      });
+      return next;
+    });
+  }
+
+  function closeBulkModal() {
+    setBulkAction(null);
+    setBulkResult(null);
+    setBulkError(undefined);
+  }
+
+  async function confirmBulkAction() {
+    if (!bulkAction) return;
+    setBulkSubmitting(true);
+    setBulkError(undefined);
+    try {
+      const result = await bulkUpdateAdminUserStatus({ userIds: Array.from(selectedIds), status: bulkAction.status });
+      setBulkAction(null);
+      setBulkResult(result);
+      setSelectedIds(new Set());
+      onMutated?.();
+    } catch (error) {
+      setBulkError(resolveErrorMessage(error, '처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.'));
+    } finally {
+      setBulkSubmitting(false);
+    }
+  }
+
   return (
     <div>
       <h1 className="ansim-page-title mb-6">유저 관리</h1>
@@ -161,11 +230,45 @@ export function AdminUsersClient({ data, loadError, filters, currentUserId, onMu
         </button>
       </form>
 
-      {loadError && <div className="ansim-card mb-4 border-red-100 bg-red-50 p-6 text-sm text-red-700">{loadError}</div>}
+      {loadError && (
+        <div className="ansim-card mb-4 border-red-100 bg-red-50 p-6 text-sm text-red-700">{loadError}</div>
+      )}
+
+      {selectedIds.size > 0 && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-teal-100 bg-teal-50 px-4 py-3">
+          <span className="text-sm font-bold text-teal-700">{selectedIds.size}명 선택됨</span>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setBulkAction({ status: 'SUSPENDED' })}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50"
+            >
+              선택 정지
+            </button>
+            <button
+              onClick={() => setBulkAction({ status: 'ACTIVE' })}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50"
+            >
+              선택 정지 해제
+            </button>
+            <button
+              onClick={() => setSelectedIds(new Set())}
+              className="rounded-lg px-3 py-1.5 text-xs font-bold text-slate-400 hover:text-slate-600"
+            >
+              선택 해제
+            </button>
+          </div>
+        </div>
+      )}
 
       {data && (
         <>
           <Table
+            selection={{
+              selectedKeys: selectedIds,
+              onToggle: toggleSelect,
+              onToggleAll: toggleSelectAll,
+              isRowSelectable: (row) => isUserBulkSelectable(row, currentUserId),
+            }}
             columns={[
               { key: 'id', header: 'ID', render: (row) => row.id },
               { key: 'email', header: '이메일', render: (row) => row.email ?? '-' },
@@ -265,6 +368,57 @@ export function AdminUsersClient({ data, loadError, filters, currentUserId, onMu
               </button>
             </div>
           </div>
+        )}
+      </Modal>
+
+      <Modal open={bulkAction !== null || bulkResult !== null} onClose={() => (bulkSubmitting ? undefined : closeBulkModal())}>
+        {bulkResult ? (
+          <div>
+            <h2 className="mb-2 text-lg font-bold text-slate-950">일괄 처리 결과</h2>
+            <p className="mb-3 text-sm text-slate-700">
+              성공 {bulkResult.succeededIds.length}명
+              {bulkResult.failures.length > 0 ? `, 실패 ${bulkResult.failures.length}명` : ''}
+            </p>
+            {bulkResult.failures.length > 0 && (
+              <ul className="mb-4 max-h-40 space-y-1 overflow-y-auto rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
+                {bulkResult.failures.map((failure) => (
+                  <li key={failure.id}>
+                    ID {failure.id}: {failure.message}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="flex justify-end">
+              <button onClick={closeBulkModal} className="ansim-button-primary px-4 py-2 text-sm">
+                확인
+              </button>
+            </div>
+          </div>
+        ) : (
+          bulkAction && (
+            <div>
+              <h2 className="mb-2 text-lg font-bold text-slate-950">
+                선택한 {selectedIds.size}명을 {bulkAction.status === 'SUSPENDED' ? '정지' : '정지 해제'}할까요?
+              </h2>
+              {bulkError && <p className="mb-3 text-sm text-red-600">{bulkError}</p>}
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={closeBulkModal}
+                  disabled={bulkSubmitting}
+                  className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-bold text-slate-600"
+                >
+                  취소
+                </button>
+                <button
+                  onClick={confirmBulkAction}
+                  disabled={bulkSubmitting}
+                  className="ansim-button-primary px-4 py-2 text-sm disabled:opacity-50"
+                >
+                  확인
+                </button>
+              </div>
+            </div>
+          )
         )}
       </Modal>
     </div>

@@ -5,16 +5,21 @@ import {
   type UserProfileDto,
   type UserTransactionTypeDto,
 } from '../types/api';
-import { type ProfileUpdateInput, type UserCurrentStage, type UserProfile, type UserTransactionType } from '../types/domain';
+import {
+  type ProfileUpdateInput,
+  type UserCurrentStage,
+  type UserProfile,
+  type UserTransactionType,
+} from '../types/domain';
 
 const transactionTypeDtoToDomain: Record<UserTransactionTypeDto, UserTransactionType> = {
   JEONSE: '전세',
-  WOLSE: '월세',
+  MONTHLY_RENT: '월세',
 };
 
 const transactionTypeDomainToDto: Record<UserTransactionType, UserTransactionTypeDto> = {
   전세: 'JEONSE',
-  월세: 'WOLSE',
+  월세: 'MONTHLY_RENT',
 };
 
 function toUserCurrentStage(value: string | null): UserCurrentStage | null {
@@ -49,7 +54,6 @@ export function mapProfileFormInputToRegisterDto(input: ProfileUpdateInput): Pro
   }
 
   return {
-    nickname: input.nickname,
     interestRegion: input.interestRegion,
     transactionType: transactionTypeDomainToDto[input.transactionType],
     currentStage: input.currentStage ?? undefined,

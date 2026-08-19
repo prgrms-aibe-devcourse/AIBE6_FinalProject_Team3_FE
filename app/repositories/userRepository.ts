@@ -22,7 +22,6 @@ export function registerMockUserProfile(input: ProfileUpdateInput): UserProfile 
   const request = mapProfileFormInputToRegisterDto(input);
   mockUserProfileDto = {
     ...mockUserProfileDto,
-    ...(request.nickname !== undefined && { nickname: request.nickname }),
     interestRegion: request.interestRegion,
     transactionType: request.transactionType,
     currentStage: request.currentStage ?? null,

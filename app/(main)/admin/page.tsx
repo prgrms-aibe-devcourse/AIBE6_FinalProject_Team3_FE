@@ -46,7 +46,8 @@ function AdminPageContent() {
         }
       })
       .catch((error) => {
-        if (!cancelled) setLoadError(resolveErrorMessage(error, '통계를 불러오지 못했습니다. 조회 기간을 확인해주세요.'));
+        if (!cancelled)
+          setLoadError(resolveErrorMessage(error, '통계를 불러오지 못했습니다. 조회 기간을 확인해주세요.'));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

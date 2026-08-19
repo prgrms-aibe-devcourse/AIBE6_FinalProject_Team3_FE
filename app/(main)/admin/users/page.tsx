@@ -6,13 +6,17 @@ import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { parsePageParam } from '../../../lib/pageParam';
 import { resolveErrorMessage } from '../../../lib/resolveErrorMessage';
 import { getAdminUsers } from '../../../services/admin';
-import { getCurrentUser } from '../../../services/auth';
 import { type AdminUserListItemDto, type PageResponseDto } from '../../../types/api';
+import { useAdminCurrentUser } from '../AdminCurrentUserContext';
 import { AdminUsersClient } from './AdminUsersClient';
 
 function AdminUsersPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  // AdminLayout이 role 게이트 과정에서 이미 확인해둔 본인 정보를 재사용한다 - 이 페이지가 직접
+  // getCurrentUser()를 또 호출하면 /admin/users에 진입할 때마다 /auth/me가 불필요하게 두 번
+  // 왕복했다(2026-08-12 정정, backend/frontend admin-design.md "전수조사 결과" 참고).
+  const { userId: currentUserId } = useAdminCurrentUser();
   const page = parsePageParam(searchParams.get('page') ?? undefined);
   const email = searchParams.get('email') ?? undefined;
   const nickname = searchParams.get('nickname') ?? undefined;
@@ -41,38 +45,49 @@ function AdminUsersPageContent() {
 
   const [data, setData] = useState<PageResponseDto<AdminUserListItemDto> | undefined>(undefined);
   const [loadError, setLoadError] = useState<string | undefined>(undefined);
-  const [currentUserId, setCurrentUserId] = useState<number | undefined>(undefined);
-  const [currentUserError, setCurrentUserError] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(true);
 
   // 이 화면 전체가 client component라 router.refresh()가 다시 가져올 Server Component 데이터가
   // 없다 - AdminUsersClient가 역할/상태 변경에 성공한 뒤 목록을 다시 그리려면 이 fetch를 직접
-  // 다시 호출해야 한다. currentUserId는 세션 중 바뀌지 않으므로 재조회 대상에서 뺀다.
+  // 다시 호출해야 한다.
   //
   // requestIdRef: 필터를 빠르게 바꾸면 이전 필터의 느린 응답이 최신 필터의 빠른 응답보다 늦게
   // 도착할 수 있다 - 매 호출마다 순번을 매겨서, 응답이 왔을 때 그게 여전히 최신 호출인지 확인한
-  // 뒤에만 state를 쓴다. useEffect의 cancelled 플래그는 loading/currentUserId만 지켜줄 뿐 이
-  // 함수 내부 쓰기는 못 막는다(onMutated로 effect 밖에서도 호출되므로 더더욱 그렇다).
+  // 뒤에만 state를 쓴다. useEffect의 cancelled 플래그는 loading만 지켜줄 뿐 이 함수 내부 쓰기는
+  // 못 막는다(onMutated로 effect 밖에서도 호출되므로 더더욱 그렇다).
   const requestIdRef = useRef(0);
-  const reloadUsers = useCallback(() => {
-    const requestId = ++requestIdRef.current;
-    return getAdminUsers({ page, email, nickname, role, status })
-      .then((usersPage) => {
-        if (requestId !== requestIdRef.current) return;
-        // 지금 페이지가 이 결과 기준으로 더 이상 유효하지 않으면, 빈 목록을 잠깐 보여주는 대신
-        // 유효한 페이지로 리다이렉트한다(그 리다이렉트가 URL을 바꿔 이 effect를 다시 실행시킨다).
-        if (clampToValidPage(usersPage.totalPages)) return;
-        setData(usersPage);
-        setLoadError(undefined);
-      })
-      .catch((error) => {
-        if (requestId !== requestIdRef.current) return;
-        // data를 그대로 두면 에러 배너 아래 이전(어쩌면 다른 필터의) 목록이 최신인 것처럼 계속
-        // 보인다 - 실패했으면 화면에는 에러만 남긴다.
-        setData(undefined);
-        setLoadError(resolveErrorMessage(error, '유저 목록을 불러오지 못했습니다.'));
-      });
-  }, [page, email, nickname, role, status, clampToValidPage]);
+  const reloadUsers = useCallback(
+    (options?: { keepDataOnError?: boolean }) => {
+      const requestId = ++requestIdRef.current;
+      return getAdminUsers({ page, email, nickname, role, status })
+        .then((usersPage) => {
+          if (requestId !== requestIdRef.current) return;
+          // 지금 페이지가 이 결과 기준으로 더 이상 유효하지 않으면, 빈 목록을 잠깐 보여주는 대신
+          // 유효한 페이지로 리다이렉트한다(그 리다이렉트가 URL을 바꿔 이 effect를 다시 실행시킨다).
+          if (clampToValidPage(usersPage.totalPages)) return;
+          setData(usersPage);
+          setLoadError(undefined);
+        })
+        .catch((error) => {
+          if (requestId !== requestIdRef.current) return;
+          const message = resolveErrorMessage(error, '유저 목록을 불러오지 못했습니다.');
+          if (options?.keepDataOnError) {
+            // 역할/상태 변경이 서버에서는 이미 성공한 뒤, 그 후속 목록 재조회만 일시적으로
+            // 실패한 경우다 - 목록을 지우면 방금 확정한 변경 자체가 실패한 것처럼 보인다. 기존
+            // 목록은 그대로 두고 경고만 남긴다(AdminUsersClient가 data/loadError를 독립적으로
+            // 렌더링하므로 목록과 경고가 함께 보인다).
+            setLoadError(message);
+            return;
+          }
+          // 필터/페이지 변경으로 인한 재조회 실패다 - data를 그대로 두면 에러 배너 아래 이전
+          // (어쩌면 다른 필터의) 목록이 최신인 것처럼 계속 보인다. 실패했으면 화면에는 에러만
+          // 남긴다.
+          setData(undefined);
+          setLoadError(message);
+        });
+    },
+    [page, email, nickname, role, status, clampToValidPage],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -81,52 +96,21 @@ function AdminUsersPageContent() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
 
-    Promise.all([
-      reloadUsers(),
-      // admin/layout.tsx가 이미 이 요청의 role을 확인해 통과시켰지만, 그 확인과 이 fetch 사이의
-      // 네트워크/CORS 순간 장애나 세션 만료까지 막아주진 않는다 - 여기서 실패를 안 잡으면
-      // Promise.all 전체가 reject되어 currentUserId가 영영 undefined로 남고, 아래 렌더링
-      // 조건(loading || currentUserId === undefined) 때문에 스피너에 영원히 갇힌다.
-      getCurrentUser()
-        .then((me) => me.userId)
-        .catch((error) => {
-          console.error('Failed to load current user', error);
-          if (!cancelled) {
-            setCurrentUserError('현재 로그인한 계정 정보를 불러오지 못했습니다. 새로고침 후 다시 시도해주세요.');
-          }
-          return undefined;
-        }),
-    ])
-      .then(([, userId]) => {
-        if (cancelled) return;
-        setCurrentUserId(userId);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+    reloadUsers().finally(() => {
+      if (!cancelled) setLoading(false);
+    });
 
     return () => {
       cancelled = true;
     };
   }, [reloadUsers]);
 
+  const reloadUsersAfterMutation = useCallback(() => reloadUsers({ keepDataOnError: true }), [reloadUsers]);
+
   if (loading) {
     return (
       <div className="flex min-h-[30vh] items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-teal-600" />
-      </div>
-    );
-  }
-
-  // currentUserId 없이는 AdminUsersClient가 "본인 계정" 판단을 할 수 없으므로 렌더링할 수 없다 -
-  // loading이 끝났는데도 여전히 undefined라면 getCurrentUser()가 실패한 것이니, 스피너를 계속
-  // 보여주는 대신 에러를 보여준다.
-  if (currentUserId === undefined) {
-    return (
-      <div className="flex min-h-[30vh] items-center justify-center">
-        <div className="ansim-card border-red-100 bg-red-50 p-6 text-sm text-red-700">
-          {currentUserError ?? '현재 로그인한 계정 정보를 불러오지 못했습니다. 새로고침 후 다시 시도해주세요.'}
-        </div>
       </div>
     );
   }
@@ -142,7 +126,7 @@ function AdminUsersPageContent() {
         status: status ?? '',
       }}
       currentUserId={currentUserId}
-      onMutated={reloadUsers}
+      onMutated={reloadUsersAfterMutation}
     />
   );
 }

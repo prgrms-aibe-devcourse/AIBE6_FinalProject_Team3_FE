@@ -7,6 +7,10 @@ type PriorityActionInput = {
   // "매물이 없다"고 단정하게 되어 실제로 매물이 있는 사용자에게 잘못된 안내가 나간다.
   propertiesLoadFailed: boolean;
   checklistOverviews: ChecklistOverview[];
+  // "새로고침" CTA용 재시도 콜백. ctaHref를 '/home'(현재 페이지 자신)으로 두면 next/link의
+  // 클라이언트 사이드 이동은 같은 라우트라 리마운트를 안 일으켜 재조회가 실제로 안 일어난다 -
+  // 그래서 이동 대신 이 콜백으로 직접 재조회를 트리거한다(PriorityActionCard 참고).
+  onRetry: () => void;
 };
 
 export function getPriorityAction({
@@ -14,6 +18,7 @@ export function getPriorityAction({
   hasProperty,
   propertiesLoadFailed,
   checklistOverviews,
+  onRetry,
 }: PriorityActionInput): PriorityAction {
   if (propertiesLoadFailed) {
     return {
@@ -21,6 +26,7 @@ export function getPriorityAction({
       description: '잠시 후 다시 시도하거나 새로고침해 주세요.',
       ctaLabel: '새로고침',
       ctaHref: '/home',
+      onCtaClick: onRetry,
     };
   }
 
@@ -49,6 +55,7 @@ export function getPriorityAction({
       description: '잠시 후 다시 시도하거나 새로고침해 주세요.',
       ctaLabel: '새로고침',
       ctaHref: '/home',
+      onCtaClick: onRetry,
     };
   }
 
